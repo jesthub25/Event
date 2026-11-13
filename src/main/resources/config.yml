@@ -1,0 +1,222 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║                 Event - 1v1 Turnuva Sistemi               ║
+# ║                    Geliştirici: Jestron                   ║
+# ╚══════════════════════════════════════════════════════════╝
+# Renk kodları: & ile (örn &a, &l). Bir mesajı tamamen kapatmak için değerini "" yapın.
+
+ayarlar:
+  # Event saatlerinin hangi saat dilimine göre çalışacağı
+  saat-dilimi: "Europe/Istanbul"
+  # Event saati gelince /event ile katılımın açık kalacağı süre (saniye). 300 = 5 dakika
+  katilim-suresi: 300
+  # Turnuvanın başlaması için gereken en az oyuncu
+  minimum-oyuncu: 2
+  # Katılım bitince ilk turun başlamasından önceki bekleme (saniye)
+  ilk-tur-bekleme: 5
+  # İki tur arasındaki bekleme (saniye)
+  tur-arasi-bekleme: 5
+  # Maç başlamadan önceki geri sayım (saniye). Bu sürede oyuncular hareket edemez / vuramaz
+  mac-geri-sayim: 3
+  # Bir maçın en uzun süresi (saniye). 0 = sınırsız. Süre bitince canı yüksek olan kazanır
+  mac-max-sure: 180
+  # Maç bitince kazananın bekleme alanına dönmeden önce odada beklediği süre (saniye)
+  mac-sonu-bekleme: 3
+  # Katılım süresince bu saniyelerde herkese duyuru yapılır
+  geri-sayim-duyurulari: [240, 180, 120, 60, 30, 15, 10, 5, 4, 3, 2, 1]
+  # Katılırken envanterin boş olması zorunlu mu? (false = eşyalar güvenle veritabanına alınır, sonra iade edilir)
+  envanter-bos-olmali: false
+  # Bekleme alanında oyuncular hasar alabilir mi? (düşme, lav vb.)
+  bekleme-alani-hasar: false
+  # Bekleme alanında açlık düşsün mü?
+  bekleme-alani-aclik: false
+  # Odalarda maç sırasında blok koyulabilsin mi? (maç bitince hepsi eski haline döner)
+  oda-blok-koyma: true
+  # Odalarda maç sırasında haritanın orijinal blokları kırılabilsin mi? (maç bitince geri gelir)
+  oda-blok-kirma: false
+  # Maç sırasında yere eşya atılabilsin mi?
+  mac-esya-atma: false
+  # Başka eklentiler (WorldGuard vb.) odalarda PvP / blok koymayı engelliyorsa maç içinde zorla izin ver
+  izinleri-zorla: true
+  # Rakibi oyundan çıkarsa / eventten ayrılırsa kazanana kill sayılsın mı?
+  cikis-kill-sayilsin: false
+  # Event ölüm mesajlarını gizle
+  olum-mesaji-gizle: true
+  # Evente katılanların kullanabileceği komutlar (/event her zaman serbest)
+  izinli-komutlar: [msg, tell, w, r, reply]
+  # Sonuç tablosunda kaç oyuncu gösterilsin
+  sonuc-gosterilecek: 3
+
+# Ödüller: sıralamaya göre konsoldan çalıştırılacak komutlar
+# Değişkenler: %player% %sira% %kill%
+oduller:
+  '1':
+    - "give %player% diamond 5"
+  '2':
+    - "give %player% diamond 3"
+  '3':
+    - "give %player% diamond 1"
+# Elenmeden önce en az 1 maç yapan herkese verilecek (boş bırakılabilir)
+katilim-odulu: []
+
+sesler:
+  event-acildi: "entity.ender_dragon.growl"
+  geri-sayim: "block.note_block.hat"
+  mac-basladi: "entity.player.levelup"
+  kazandin: "ui.toast.challenge_complete"
+  kaybettin: "entity.villager.no"
+  sampiyon: "ui.toast.challenge_complete"
+
+mesajlar:
+  prefix: "&8[&6&l1v1 Event&8] &r"
+  # --- Genel ---
+  sadece-oyuncu: "%prefix%&cBu komutu sadece oyuncular kullanabilir."
+  yetki-yok: "%prefix%&cBunun için yetkin yok."
+  gecersiz-saat: "%prefix%&cGeçersiz saat: &e%saat%&c. Örnek: &e20:00"
+  event-bulunamadi: "%prefix%&c&e%saat% &csaatinde bir event yok. &7(/event liste)"
+  kullanim: "%prefix%&cKullanım: &e%kullanim%"
+  reload: "%prefix%&aAyarlar yeniden yüklendi."
+  # --- Katılım ---
+  event-acildi:
+    - "&8&m                                                  "
+    - "&6&l⚔ 1v1 EVENT BAŞLIYOR! &7(%saat%)"
+    - "&fKatılmak için &e/event &fyaz! Kalan süre: &e%sure%"
+    - "&8&m                                                  "
+  katil-butonu: "&a&l[ TIKLA VE KATIL ]"
+  katil-butonu-hover: "&7Tıkla ve 1v1 evente katıl!"
+  katilim-geri-sayim: "%prefix%&fEvente katılım için son &e%sure%&f! &7(Katılımcı: &a%sayi%&7) &e/event"
+  katilim-actionbar: "&6Event başlamasına &e%sure% &8| &aKatılımcı: &f%sayi%"
+  event-aktif-degil: "%prefix%&cŞu anda katılım açık bir event yok."
+  sonraki-event: "%prefix%&7Sonraki event: &e%saat% &7(&f%sure% &7sonra)"
+  event-devam-ediyor: "%prefix%&cEvent zaten başladı, katılım kapandı."
+  zaten-katildin: "%prefix%&cZaten eventtesin. Ayrılmak için &e/event ayril"
+  envanter-bos-olmali: "%prefix%&cEvente katılmak için envanterin tamamen boş olmalı."
+  veritabani-hatasi: "%prefix%&cEşyaların güvenle kaydedilemedi, katılım iptal edildi. Yetkililere bildir."
+  konum-hatasi: "%prefix%&cEvent konumu yüklenemedi (dünya yüklü değil). Yetkililere bildir."
+  katildin: "%prefix%&aEvente katıldın! Eşyaların güvenle saklandı, event bitince iade edilecek."
+  katildi: "%prefix%&e%player% &fevente katıldı. &7(&a%sayi%&7)"
+  ayrildin: "%prefix%&eEventten ayrıldın. Eşyaların iade edildi."
+  ayrildi: "%prefix%&e%player% &feventten ayrıldı. &7(&a%sayi%&7)"
+  evente-katilmadin: "%prefix%&cEventte değilsin."
+  esyalar-iade: "%prefix%&aEventten kalan eşyaların envanterine iade edildi."
+  komut-engellendi: "%prefix%&cEvent sırasında bu komutu kullanamazsın. Ayrılmak için &e/event ayril"
+  alan-disi: "%prefix%&cEvent alanından çıkamazsın!"
+  # --- Turnuva ---
+  yetersiz-oyuncu: "%prefix%&cYeterli oyuncu katılmadığı için event iptal edildi. &7(%sayi%/%min%)"
+  turnuva-basladi:
+    - "&8&m                                                  "
+    - "&6&l⚔ 1v1 EVENT BAŞLADI! &7(%saat%)"
+    - "&fToplam &e%sayi% &foyuncu kapışıyor. Bol şans!"
+    - "&8&m                                                  "
+  tur-basladi: "%prefix%&6&lTUR %tur% &fbaşladı! &7(&e%mac% &7maç, &a%kalan% &7oyuncu)"
+  tur-bitti: "%prefix%&7Tur %tur% tamamlandı. Sonraki tur &e%sure% &7saniye içinde..."
+  bay-gecti: "%prefix%&eBu turda eşleşecek rakip kalmadı, doğrudan sonraki tura geçtin!"
+  bay-duyuru: "%prefix%&e%player% &7bu turu bay geçti."
+  rakip-yok: "%prefix%&eRakibin oyundan ayrıldı, bu turu kazanmış sayıldın!"
+  mac-basliyor: "%prefix%&fRakibin: &c%rakip% &7| Oda: &e%oda%"
+  mac-duyuru: "%prefix%&e%a% &7⚔ &e%b% &8(&7%oda%&8)"
+  mac-sirada: "%prefix%&7Boş oda bekleniyor, maçın sıraya alındı."
+  geri-sayim-title: "&e%sayi%"
+  geri-sayim-subtitle: "&7Rakip: &c%rakip%"
+  basla-title: "&a&lBAŞLA!"
+  basla-subtitle: "&7Bol şans!"
+  sure-actionbar: "&cMaçın bitmesine &e%sure% &csaniye!"
+  zaman-asimi: "%prefix%&eSüre doldu! Canı yüksek olan kazandı."
+  kazandin-title: "&a&lKAZANDIN!"
+  kazandin-subtitle: "&7Sonraki turu bekle"
+  kaybettin-title: "&c&lELENDİN"
+  kaybettin-subtitle: "&7Eşyaların iade edildi"
+  mac-sonucu: "%prefix%&a%kazanan% &7, &c%kaybeden% &7adlı oyuncuyu yendi! &8(%sebep%&8)"
+  sebep-olum: "&7öldürdü"
+  sebep-cikis: "&7rakip çıktı"
+  sebep-ayrildi: "&7rakip ayrıldı"
+  sebep-sure: "&7süre doldu"
+  tura-yukseldin: "%prefix%&aTebrikler! Sonraki turu bekleme alanında bekle."
+  elendin: "%prefix%&cElendin! Eşyaların iade edildi."
+  oyuncu-elendi: "%prefix%&c%player% &7elendi. &8(&aKalan: %kalan%&8)"
+  bekleme-actionbar: "&6Tur %tur% &8| &aKalan: &f%kalan% &8| &eAktif maç: &f%mac% &8| &bSıradaki: &f%sira%"
+  # --- Bitiş ---
+  sonuc-baslik:
+    - "&8&m                                                  "
+    - "&6&l🏆 1v1 EVENT SONUÇLARI &7(%saat%)"
+    - ""
+  sonuc-satir: "  &e&l%sira%. &f%player% &7(&c%kill% kill&7)"
+  sonuc-alt:
+    - ""
+    - "&7Toplam katılımcı: &f%sayi%"
+    - "&8&m                                                  "
+  sampiyon-title: "&6&lŞAMPİYON!"
+  sampiyon-subtitle: "&eTebrikler %player%!"
+  kazanan-yok: "%prefix%&cEvent kazanan olmadan sona erdi."
+  event-durduruldu: "%prefix%&cEvent bir yetkili tarafından durduruldu. Eşyalar iade edildi."
+  event-acilamadi: "%prefix%&c&e%saat% &cevent'i açılamadı! Eksikler: &e%eksik%"
+  zaten-aktif: "%prefix%&cŞu anda zaten aktif bir event var."
+  aktif-event-yok: "%prefix%&cAktif bir event yok."
+  event-zorla-acildi: "%prefix%&a&e%saat% &aeventi başlatıldı."
+  # --- Yönetim ---
+  event-olusturuldu: "%prefix%&a&e%saat% &aevent saati oluşturuldu. Şimdi: &e/event alan oluştur %saat%&a, &e/event setspawn %saat%&a, &e/event oda oluştur <isim> %saat%&a, &e/event kit ayarla %saat%"
+  event-zaten-var: "%prefix%&c&e%saat% &csaatinde zaten bir event var."
+  event-silindi: "%prefix%&a&e%saat% &aevent'i ve tüm odaları silindi."
+  event-calisirken-olmaz: "%prefix%&cBu event şu an çalışıyor, önce &e/event durdur&c."
+  hub-ayarlandi: "%prefix%&aEvent hub konumu ayarlandı: &e%konum%"
+  spawn-ayarlandi: "%prefix%&a&e%saat% &aevent spawn konumu ayarlandı: &e%konum%"
+  spawn-alan-disinda: "%prefix%&cSpawn, &e%saat% &cevent alanının içinde olmalı! Alanın içinde dur."
+  spawn-saat-belirt: "%prefix%&cBirden fazla event var, saati belirt: &e/event setspawn <saat>"
+  alan-ayarlandi: "%prefix%&a&e%saat% &aevent alanı ayarlandı: &e%alan%"
+  alan-silindi: "%prefix%&a&e%saat% &aevent alanı silindi."
+  secim-yok: "%prefix%&cÖnce WorldEdit/FAWE wand ile &ePos1 &cve &ePos2 &cseç. (Yoksa: &e/event wand&c)"
+  secim-farkli-dunya: "%prefix%&cPos1 ve Pos2 aynı dünyada olmalı."
+  wand-verildi: "%prefix%&aSeçim çubuğu verildi. Sol tık: Pos1, Sağ tık: Pos2"
+  wand-pos: "%prefix%&aPos%no% &fseçildi: &e%konum%"
+  oda-olusturuldu: "%prefix%&a&e%oda% &aodası &e%saat% &aeventi için oluşturuldu. Spawn1: &e%s1% &7| &aSpawn2: &e%s2%"
+  oda-spawn-ipucu: "%prefix%&7Spawnlar otomatik ayarlandı. Değiştirmek için odada durup: &e/event oda spawn %oda% %saat% 1|2"
+  oda-zaten-var: "%prefix%&c&e%oda% &codası bu event için zaten var."
+  oda-bulunamadi: "%prefix%&c&e%saat% &ceventinde &e%oda% &cadında oda yok."
+  oda-silindi: "%prefix%&a&e%oda% &aodası (&e%saat%&a) silindi."
+  oda-kullanimda: "%prefix%&cBu oda şu an maçta kullanılıyor."
+  oda-isim-gecersiz: "%prefix%&cOda ismi sadece harf, rakam, _ ve - içerebilir (en fazla 32)."
+  oda-spawn-ayarlandi: "%prefix%&a&e%oda% &aodası Spawn%no% ayarlandı: &e%konum%"
+  oda-spawn-disinda: "%prefix%&cSpawn noktası odanın içinde olmalı."
+  oda-liste-baslik: "%prefix%&6%saat% &fodaları (&e%sayi%&f):"
+  oda-liste-satir: "  &8- &e%oda% &7(%alan%)"
+  oda-liste-bos: "%prefix%&7Bu event için oda yok."
+  kit-ayarlandi: "%prefix%&a&e%saat% &aevent kiti envanterinden kaydedildi (&e%sayi% &aeşya, slotlarıyla birlikte)."
+  kit-bos: "%prefix%&cEnvanterin boş, kaydedilecek eşya yok."
+  kit-yok: "%prefix%&cBu eventin kiti ayarlanmamış."
+  kit-alindi: "%prefix%&a&e%saat% &akiti envanterine yüklendi."
+  kit-envanter-dolu: "%prefix%&cKiti yüklemek için envanterin boş olmalı."
+  kit-silindi: "%prefix%&a&e%saat% &akiti silindi."
+  liste-baslik: "%prefix%&6Event saatleri:"
+  liste-satir: "  &8- &e%saat% &7| Alan: %alan% &7| Spawn: %spawn% &7| Kit: %kit% &7| Oda: &f%oda%"
+  liste-bos: "%prefix%&7Hiç event yok. &e/event oluştur 20:00"
+  bilgi-yok: "%prefix%&7Şu anda aktif event yok."
+  bilgi-katilim: "%prefix%&e%saat% &feventi katılım aşamasında. &7Kalan: &e%sure% &7| Katılımcı: &a%sayi%"
+  bilgi-turnuva: "%prefix%&e%saat% &feventi devam ediyor. &7Tur: &e%tur% &7| Kalan: &a%kalan% &7| Aktif maç: &e%mac%"
+  gecmis-baslik: "%prefix%&6Son eventler:"
+  gecmis-satir: "  &8- &7%tarih% &e%saat% &7| Kazanan: &a%kazanan% &7(%sayi% oyuncu)"
+  gecmis-bos: "%prefix%&7Henüz tamamlanmış event yok."
+  yardim-oyuncu:
+    - "&8&m                                                  "
+    - "&6&l1v1 Event &7- Komutlar"
+    - "&e/event &7- Açık evente katıl"
+    - "&e/event ayril &7- Eventten ayrıl"
+    - "&e/event bilgi &7- Event durumu"
+    - "&e/event gecmis &7- Son event sonuçları"
+    - "&8&m                                                  "
+  yardim-admin:
+    - "&6&lYönetim:"
+    - "&e/event oluştur <saat> &7- Event saati oluştur (örn 20:00)"
+    - "&e/event sil <saat> &7- Event saatini sil"
+    - "&e/event liste &7- Event saatleri ve durumları"
+    - "&e/event alan oluştur <saat> &7- Seçimi event alanı yap"
+    - "&e/event setspawn [saat] &7- /event ile gidilecek nokta"
+    - "&e/event sethub &7- Elenenlerin gideceği nokta"
+    - "&e/event oda oluştur <isim> <saat> &7- Seçimi 1v1 odası yap"
+    - "&e/event oda sil <isim> <saat> &7- Odayı sil"
+    - "&e/event oda spawn <isim> <saat> <1|2> &7- Oda spawnı ayarla"
+    - "&e/event oda liste [saat] &7- Odaları listele"
+    - "&e/event kit ayarla <saat> &7- Envanterini kit yap"
+    - "&e/event kit al <saat> &7- Kiti envanterine yükle"
+    - "&e/event başlat <saat> &7- Eventi hemen aç"
+    - "&e/event durdur &7- Aktif eventi durdur"
+    - "&e/event wand &7- WorldEdit yoksa seçim çubuğu"
+    - "&e/event reload &7- Ayarları yenile"

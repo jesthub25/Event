@@ -1,0 +1,20 @@
+name: Event
+version: '${project.version}'
+main: org.jestron.event.EventPlugin
+api-version: '1.20'
+author: Jestron
+website: https://github.com/jesthub25/Event
+description: Otomatik zamanlanmis 1v1 turnuva event sistemi
+softdepend: [WorldEdit, FastAsyncWorldEdit, Multiverse-Core]
+commands:
+  event:
+    description: 1v1 Event komutu
+    usage: /event
+    aliases: [etkinlik]
+permissions:
+  event.use:
+    description: Evente katilma
+    default: true
+  event.admin:
+    description: Event yonetimi
+    default: op
