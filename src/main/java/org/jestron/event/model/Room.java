@@ -1,13 +1,10 @@
 package org.jestron.event.model;
 
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.World;
-import org.bukkit.block.Block;
 
 import java.util.Locale;
 
-/** Bir event saatine ait 1v1 odası. */
+/** Bir event saatine ait 1v1 odası. 1. oyuncu spawn1'e, 2. oyuncu spawn2'ye ışınlanır. */
 public final class Room {
 
     public final String name;
@@ -35,42 +32,11 @@ public final class Room {
         return spawn(1) != null && spawn(2) != null;
     }
 
-    /**
-     * Odanın uzun ekseninin iki ucuna, birbirine bakan iki güvenli spawn hesaplar.
-     */
-    public static Pos autoSpawn(Region r, boolean first) {
-        World w = Bukkit.getWorld(r.world);
-        if (w == null) return null;
-        int lenX = r.maxX - r.minX + 1;
-        int lenZ = r.maxZ - r.minZ + 1;
-        boolean alongX = lenX >= lenZ;
-        int len = alongX ? lenX : lenZ;
-        int inset = Math.max(1, Math.min(3, len / 4));
-        if (len <= 2) inset = 0;
-        int x;
-        int z;
-        float yaw;
-        if (alongX) {
-            x = first ? r.minX + inset : r.maxX - inset;
-            z = Math.floorDiv(r.minZ + r.maxZ, 2);
-            yaw = first ? -90f : 90f;
-        } else {
-            z = first ? r.minZ + inset : r.maxZ - inset;
-            x = Math.floorDiv(r.minX + r.maxX, 2);
-            yaw = first ? 0f : 180f;
-        }
-        int y = standY(w, x, z, r.minY, r.maxY);
-        return new Pos(r.world, x + 0.5, y, z + 0.5, yaw, 0f);
-    }
-
-    private static int standY(World w, int x, int z, int minY, int maxY) {
-        for (int y = maxY - 1; y >= minY; y--) {
-            Block b = w.getBlockAt(x, y, z);
-            if (b.getType().isSolid() && w.getBlockAt(x, y + 1, z).isPassable()
-                    && w.getBlockAt(x, y + 2, z).isPassable()) {
-                return y + 1;
-            }
-        }
-        return minY + 1;
+    /** Bloğun tam ortası, bakış yönü en yakın ana yöne (K/D/G/B) hizalı, düz bakış. */
+    public static Pos alignedSpawn(Location l) {
+        float yaw = Math.round(l.getYaw() / 90f) * 90f;
+        yaw = ((yaw % 360f) + 360f) % 360f;
+        if (yaw > 180f) yaw -= 360f;
+        return new Pos(l.getWorld().getName(), l.getBlockX() + 0.5, l.getY(), l.getBlockZ() + 0.5, yaw, 0f);
     }
 }

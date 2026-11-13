@@ -4,6 +4,7 @@ import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 import org.jestron.event.model.EventDef;
 import org.jestron.event.model.Pos;
 import org.jestron.event.model.Region;
@@ -12,34 +13,71 @@ import org.jestron.event.util.TimeUtil;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
-/** data.yml : hub, event saatleri, alanlar, spawnlar, kitler ve odalar. */
+/**
+ * data.yml (hub, event saatleri, alan, spawn, kit, odalar) ve history.yml (son eventler).
+ * Kayıt: içerik ana thread'de metne çevrilir, diske yazma arka planda yapılır (sunucu donmaz).
+ */
 public final class DataStore {
 
+    private static final int HISTORY_LIMIT = 20;
+
+    private final Plugin plugin;
+    /** Tek thread: kayıtlar sırayla yazılır, eski içerik yenisinin üstüne yazılamaz. */
+    private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Event-IO");
+        t.setDaemon(true);
+        return t;
+    });
     private final File file;
-    private final Logger log;
+    private final File historyFile;
     public Pos hub;
     /** "20:00" -> EventDef (saate göre sıralı) */
     public final Map<String, EventDef> events = new TreeMap<>();
+    /** [saat, zaman(ms), oyuncu sayısı, kazanan] */
+    public final List<String[]> history = new ArrayList<>();
 
-    public DataStore(File file, Logger log) {
-        this.file = file;
-        this.log = log;
+    public DataStore(Plugin plugin) {
+        this.plugin = plugin;
+        this.file = new File(plugin.getDataFolder(), "data.yml");
+        this.historyFile = new File(plugin.getDataFolder(), "history.yml");
     }
 
     public EventDef event(String time) {
         return time == null ? null : events.get(time);
     }
 
+    /** Oda isimleri tüm eventlerde benzersizdir. [EventDef, Room] ya da null. */
+    public Object[] findRoom(String name) {
+        for (EventDef d : events.values()) {
+            Room r = d.room(name);
+            if (r != null) return new Object[]{d, r};
+        }
+        return null;
+    }
+
     public void load() {
         events.clear();
         hub = null;
+        history.clear();
+        if (historyFile.exists()) {
+            YamlConfiguration h = YamlConfiguration.loadConfiguration(historyFile);
+            for (String line : h.getStringList("history")) {
+                String[] p = line.split("\\|", -1);
+                if (p.length == 4) history.add(p);
+            }
+        }
         if (!file.exists()) return;
         YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
         hub = Pos.load(y.getConfigurationSection("hub"));
@@ -50,7 +88,7 @@ public final class DataStore {
             if (s == null) continue;
             String time = TimeUtil.parseTime(s.getString("time", TimeUtil.fromKey(key)));
             if (time == null) {
-                log.warning("data.yml: gecersiz event saati atlandi: " + key);
+                plugin.getLogger().warning("data.yml: gecersiz event saati atlandi: " + key);
                 continue;
             }
             EventDef def = new EventDef(time);
@@ -68,7 +106,7 @@ public final class DataStore {
                     } catch (NumberFormatException ignored) {
                     }
                 }
-                def.kit = arr;
+                def.setKit(arr);
             }
             ConfigurationSection rooms = s.getConfigurationSection("rooms");
             if (rooms != null) {
@@ -80,6 +118,10 @@ public final class DataStore {
                     Room room = new Room(rs.getString("name", rk), reg,
                             Pos.load(rs.getConfigurationSection("spawn1")),
                             Pos.load(rs.getConfigurationSection("spawn2")));
+                    if (findRoom(room.name) != null) {
+                        plugin.getLogger().warning("data.yml: ayni isimde oda atlandi: " + room.name);
+                        continue;
+                    }
                     def.rooms.put(room.key(), room);
                 }
             }
@@ -87,7 +129,7 @@ public final class DataStore {
         }
     }
 
-    public synchronized void save() {
+    private String serialize() {
         YamlConfiguration y = new YamlConfiguration();
         if (hub != null) hub.save(y.createSection("hub"));
         ConfigurationSection ev = y.createSection("events");
@@ -114,14 +156,60 @@ public final class DataStore {
                 if (r.spawn2 != null) r.spawn2.save(rs.createSection("spawn2"));
             }
         }
+        return y.saveToString();
+    }
+
+    private String serializeHistory() {
+        YamlConfiguration h = new YamlConfiguration();
+        List<String> lines = new ArrayList<>();
+        for (String[] r : history) lines.add(String.join("|", r));
+        h.set("history", lines);
+        return h.saveToString();
+    }
+
+    public void addHistory(String time, int players, String winner) {
+        history.add(0, new String[]{time, String.valueOf(System.currentTimeMillis()), String.valueOf(players),
+                winner == null ? "-" : winner});
+        while (history.size() > HISTORY_LIMIT) history.remove(history.size() - 1);
+        write(historyFile, serializeHistory(), true);
+    }
+
+    /** Arka planda kaydet. */
+    public void save() {
+        write(file, serialize(), true);
+    }
+
+    /** Hemen kaydet (kapanışta). */
+    public void saveNow() {
+        close();
+        write(file, serialize(), false);
+        write(historyFile, serializeHistory(), false);
+    }
+
+    private void write(File target, String content, boolean async) {
+        if (async && !io.isShutdown()) io.execute(() -> writeFile(target, content));
+        else writeFile(target, content);
+    }
+
+    /** Bekleyen yazmaları bitirip IO thread'ini kapatır. */
+    public void close() {
+        io.shutdown();
         try {
-            File parent = file.getParentFile();
+            io.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private synchronized void writeFile(File target, String content) {
+        try {
+            File parent = target.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
-            File tmp = new File(file.getParentFile(), file.getName() + ".tmp");
-            y.save(tmp);
-            Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            File tmp = new File(parent, target.getName() + ".tmp");
+            Files.write(tmp.toPath(), content.getBytes(StandardCharsets.UTF_8));
+            Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            log.log(Level.SEVERE, "data.yml kaydedilemedi", e);
+            plugin.getLogger().log(Level.SEVERE, target.getName() + " kaydedilemedi", e);
         }
     }
 }

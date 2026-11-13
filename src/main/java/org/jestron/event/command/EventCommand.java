@@ -25,10 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 import java.util.TimeZone;
 import java.util.regex.Pattern;
 
@@ -285,17 +282,18 @@ public final class EventCommand implements TabExecutor {
     // ------------------------------------------------------------ odalar
 
     private void room(CommandSender s, String[] args) {
+        String usage = "/event oda oluştur|sil|setspawn1|setspawn2|liste ...";
         if (args.length < 2) {
-            msg.send(s, "kullanim", "kullanim", "/event oda oluştur|sil|spawn|liste ...");
+            msg.send(s, "kullanim", "kullanim", usage);
             return;
         }
-        String action = Text.normalize(args[1]);
-        switch (action) {
+        switch (Text.normalize(args[1])) {
             case "olustur", "create" -> roomCreate(s, args);
             case "sil", "delete" -> roomDelete(s, args);
-            case "spawn", "setspawn" -> roomSpawn(s, args);
+            case "setspawn1" -> roomSpawn(s, args, 1);
+            case "setspawn2" -> roomSpawn(s, args, 2);
             case "liste", "list" -> roomList(s, args);
-            default -> msg.send(s, "kullanim", "kullanim", "/event oda oluştur|sil|spawn|liste ...");
+            default -> msg.send(s, "kullanim", "kullanim", usage);
         }
     }
 
@@ -311,39 +309,40 @@ public final class EventCommand implements TabExecutor {
             msg.send(p, "oda-isim-gecersiz");
             return;
         }
-        EventDef def = requireEvent(p, args[3]);
-        if (def == null) return;
-        if (def.room(name) != null) {
+        if (store().findRoom(name) != null) {
             msg.send(p, "oda-zaten-var", "oda", name);
             return;
         }
+        EventDef def = requireEvent(p, args[3]);
+        if (def == null) return;
         if (manager().isRunning(def)) {
             msg.send(p, "event-calisirken-olmaz");
             return;
         }
         Region r = requireSelection(p);
         if (r == null) return;
-        Room room = new Room(name, r, Room.autoSpawn(r, true), Room.autoSpawn(r, false));
+        Room room = new Room(name, r, null, null);
         def.rooms.put(room.key(), room);
         store().save();
-        msg.send(p, "oda-olusturuldu", "oda", name, "saat", def.time,
-                "s1", room.spawn1 == null ? "-" : room.spawn1.describe(),
-                "s2", room.spawn2 == null ? "-" : room.spawn2.describe());
-        msg.send(p, "oda-spawn-ipucu", "oda", name, "saat", def.time);
+        msg.send(p, "oda-olusturuldu", "oda", name, "saat", def.time);
+    }
+
+    /** [EventDef, Room] ya da null (mesaj gönderilir) */
+    private Object[] requireRoom(CommandSender s, String name) {
+        Object[] found = store().findRoom(name);
+        if (found == null) msg.send(s, "oda-bulunamadi", "oda", name);
+        return found;
     }
 
     private void roomDelete(CommandSender s, String[] args) {
-        if (args.length < 4) {
-            msg.send(s, "kullanim", "kullanim", "/event oda sil <isim> <saat>");
+        if (args.length < 3) {
+            msg.send(s, "kullanim", "kullanim", "/event oda sil <isim>");
             return;
         }
-        EventDef def = requireEvent(s, args[3]);
-        if (def == null) return;
-        Room room = def.room(args[2]);
-        if (room == null) {
-            msg.send(s, "oda-bulunamadi", "oda", args[2], "saat", def.time);
-            return;
-        }
+        Object[] found = requireRoom(s, args[2]);
+        if (found == null) return;
+        EventDef def = (EventDef) found[0];
+        Room room = (Room) found[1];
         EventSession session = manager().session();
         if (session != null && session.def == def && session.matches.containsKey(room.key())) {
             msg.send(s, "oda-kullanimda");
@@ -354,33 +353,21 @@ public final class EventCommand implements TabExecutor {
         msg.send(s, "oda-silindi", "oda", room.name, "saat", def.time);
     }
 
-    private void roomSpawn(CommandSender s, String[] args) {
-        if (args.length < 5) {
-            msg.send(s, "kullanim", "kullanim", "/event oda spawn <isim> <saat> <1|2>");
+    private void roomSpawn(CommandSender s, String[] args, int no) {
+        if (args.length < 3) {
+            msg.send(s, "kullanim", "kullanim", "/event oda setspawn" + no + " <oda>");
             return;
         }
         Player p = player(s);
         if (p == null) return;
-        EventDef def = requireEvent(p, args[3]);
-        if (def == null) return;
-        Room room = def.room(args[2]);
-        if (room == null) {
-            msg.send(p, "oda-bulunamadi", "oda", args[2], "saat", def.time);
+        Object[] found = requireRoom(p, args[2]);
+        if (found == null) return;
+        Room room = (Room) found[1];
+        if (!room.region.contains(p.getLocation())) {
+            msg.send(p, "oda-spawn-disinda", "oda", room.name);
             return;
         }
-        int no;
-        if (args[4].equals("1")) no = 1;
-        else if (args[4].equals("2")) no = 2;
-        else {
-            msg.send(p, "kullanim", "kullanim", "/event oda spawn <isim> <saat> <1|2>");
-            return;
-        }
-        Location l = p.getLocation();
-        if (!room.region.containsLoose(l, 0, 2)) {
-            msg.send(p, "oda-spawn-disinda");
-            return;
-        }
-        Pos pos = Pos.of(l);
+        Pos pos = Room.alignedSpawn(p.getLocation());
         if (no == 1) room.spawn1 = pos;
         else room.spawn2 = pos;
         store().save();
@@ -401,14 +388,10 @@ public final class EventCommand implements TabExecutor {
             return;
         }
         for (EventDef def : defs) {
-            if (def.rooms.isEmpty()) {
-                msg.send(s, "oda-liste-baslik", "saat", def.time, "sayi", 0);
-                msg.send(s, "oda-liste-bos");
-                continue;
-            }
             msg.send(s, "oda-liste-baslik", "saat", def.time, "sayi", def.rooms.size());
             for (Room r : def.rooms.values()) {
-                msg.send(s, "oda-liste-satir", "oda", r.name, "alan", r.region.describe());
+                msg.send(s, "oda-liste-satir", "oda", r.name,
+                        "s1", Text.color(yesNo(r.spawn(1) != null)), "s2", Text.color(yesNo(r.spawn(2) != null)));
             }
         }
     }
@@ -444,7 +427,7 @@ public final class EventCommand implements TabExecutor {
                     msg.send(p, "kit-bos");
                     return;
                 }
-                def.kit = copy;
+                def.setKit(copy);
                 store().save();
                 msg.send(p, "kit-ayarlandi", "saat", def.time, "sayi", count);
             }
@@ -471,7 +454,7 @@ public final class EventCommand implements TabExecutor {
                     msg.send(s, "event-calisirken-olmaz");
                     return;
                 }
-                def.kit = null;
+                def.setKit(null);
                 store().save();
                 msg.send(s, "kit-silindi", "saat", def.time);
             }
@@ -495,7 +478,7 @@ public final class EventCommand implements TabExecutor {
         EventSession session = manager().session();
         if (session == null) {
             msg.send(s, "bilgi-yok");
-            Object[] next = TimeUtil.next(store().events.keySet(), manager().zone());
+            Object[] next = TimeUtil.next(store().events.keySet(), plugin.settings().zone);
             if (next != null) msg.send(s, "sonraki-event", "saat", next[0], "sure", TimeUtil.formatDuration((Long) next[1]));
             return;
         }
@@ -509,17 +492,18 @@ public final class EventCommand implements TabExecutor {
     }
 
     private void history(CommandSender s) {
-        List<String[]> rows = plugin.database().recentHistory(5);
+        List<String[]> rows = store().history;
         if (rows.isEmpty()) {
             msg.send(s, "gecmis-bos");
             return;
         }
-        SimpleDateFormat f = new SimpleDateFormat("dd.MM.yyyy HH:mm", new Locale("tr", "TR"));
-        f.setTimeZone(TimeZone.getTimeZone(manager().zone()));
+        SimpleDateFormat f = new SimpleDateFormat("dd.MM.yyyy HH:mm");
+        f.setTimeZone(TimeZone.getTimeZone(plugin.settings().zone));
         msg.send(s, "gecmis-baslik");
-        for (String[] r : rows) {
+        for (int i = 0; i < Math.min(5, rows.size()); i++) {
+            String[] r = rows.get(i);
             msg.send(s, "gecmis-satir", "tarih", f.format(new Date(Long.parseLong(r[1]))), "saat", r[0],
-                    "kazanan", r[3] == null ? "-" : r[3], "sayi", r[2]);
+                    "kazanan", r[3], "sayi", r[2]);
         }
     }
 
@@ -558,25 +542,15 @@ public final class EventCommand implements TabExecutor {
             }
             case "oda" -> {
                 if (args.length == 2) {
-                    out.addAll(Arrays.asList("oluştur", "sil", "spawn", "liste"));
+                    out.addAll(Arrays.asList("oluştur", "sil", "setspawn1", "setspawn2", "liste"));
                 } else {
                     String action = Text.normalize(args[1]);
                     if (action.equals("olustur")) {
                         if (args.length == 3) out.add("<isim>");
                         else if (args.length == 4) out.addAll(times);
-                    } else if (action.equals("sil") || action.equals("spawn")) {
-                        if (args.length == 3) {
-                            Set<String> names = new LinkedHashSet<>();
-                            for (EventDef d : store().events.values()) {
-                                for (Room r : d.rooms.values()) names.add(r.name);
-                            }
-                            out.addAll(names);
-                        } else if (args.length == 4) {
-                            for (EventDef d : store().events.values()) {
-                                if (d.room(args[2]) != null) out.add(d.time);
-                            }
-                        } else if (args.length == 5 && action.equals("spawn")) {
-                            out.addAll(Arrays.asList("1", "2"));
+                    } else if (args.length == 3 && (action.equals("sil") || action.startsWith("setspawn"))) {
+                        for (EventDef d : store().events.values()) {
+                            for (Room r : d.rooms.values()) out.add(r.name);
                         }
                     } else if (action.equals("liste") && args.length == 3) {
                         out.addAll(times);

@@ -1,6 +1,7 @@
 package org.jestron.event.game;
 
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -12,19 +13,20 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
 import org.jestron.event.EventPlugin;
 import org.jestron.event.game.Participant.State;
 import org.jestron.event.model.EventDef;
 import org.jestron.event.model.Pos;
+import org.jestron.event.model.Region;
 import org.jestron.event.model.Room;
-import org.jestron.event.storage.PlayerBackup;
 import org.jestron.event.util.Messages;
 import org.jestron.event.util.PlayerUtil;
+import org.jestron.event.util.Settings;
 import org.jestron.event.util.TimeUtil;
 
-import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -36,10 +38,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.logging.Level;
 
 /**
- * Turnuva motoru: zamanlama, katılım, eşleştirme, tur yönetimi, maçlar, eleme, sonuç ve ödüller.
- * Tüm işlemler ana thread üzerinde çalışır.
+ * Turnuva motoru: zamanlama, katılım, eşleştirme, turlar, maçlar, eleme, sonuç ve ödüller.
+ * Tamamen ana thread üzerinde, saniyede bir tick ile çalışır.
  */
 public final class EventManager {
 
@@ -49,21 +52,26 @@ public final class EventManager {
     private final Messages msg;
     private EventSession session;
     private BukkitTask ticker;
+    private int lastScheduleMinute = -1;
 
-    /** Eklentinin kendi ışınlamaları (teleport koruması bunları engellemez) */
+    /** Eklentinin kendi ışınlamaları (koruma bunları engellemez) */
     private final Set<UUID> allowedTeleport = new HashSet<>();
-    /** Oyundan çıkmakta olan oyuncular (quit event sırasında "çevrimdışı" sayılır) */
+    /** Quit event sırasında "çevrimdışı" sayılanlar */
     private final Set<UUID> quitting = new HashSet<>();
-    /** Öldükten sonra doğacakları yer */
+    /** Ölünce doğacakları yer */
     private final Map<UUID, Location> respawnTo = new HashMap<>();
-    /** Doğunca eşyaları iade edilip hub'a gönderilecekler */
-    private final Set<UUID> restoreAfterRespawn = new HashSet<>();
-    /** Maçı kazandıktan sonra ölen (ör. ateş) kazananlar: doğunca bekleme alanına */
+    /** Doğunca eventten çıkarılacaklar -> eski oyun modu */
+    private final Map<UUID, GameMode> releaseAfterRespawn = new HashMap<>();
+    /** Maçı kazandıktan sonra ölen kazananlar: doğunca bekleme alanına */
     private final Set<UUID> resetAfterRespawn = new HashSet<>();
 
     public EventManager(EventPlugin plugin) {
         this.plugin = plugin;
         this.msg = plugin.messages();
+    }
+
+    private Settings cfg() {
+        return plugin.settings();
     }
 
     // ------------------------------------------------------------------ yaşam döngüsü
@@ -86,10 +94,11 @@ public final class EventManager {
         return session != null && session.def == def;
     }
 
-    /** Aktif (elenmemiş) katılımcı, yoksa null. */
+    /** Aktif (elenmemiş) katılımcı, yoksa null. Event yokken tek bir null kontrolü. */
     public Participant participant(Player p) {
-        if (session == null || p == null) return null;
-        Participant pt = session.get(p.getUniqueId());
+        EventSession s = session;
+        if (s == null || p == null) return null;
+        Participant pt = s.participants.get(p.getUniqueId());
         return pt != null && pt.active() ? pt : null;
     }
 
@@ -98,27 +107,8 @@ public final class EventManager {
     }
 
     public Location eventSpawn() {
-        if (session == null || session.def.spawn == null) return null;
-        return session.def.spawn.toLocation();
-    }
-
-    // ------------------------------------------------------------------ ayarlar
-
-    private int cfgInt(String key, int def) {
-        return plugin.getConfig().getInt("ayarlar." + key, def);
-    }
-
-    private boolean cfgBool(String key, boolean def) {
-        return plugin.getConfig().getBoolean("ayarlar." + key, def);
-    }
-
-    public ZoneId zone() {
-        String z = plugin.getConfig().getString("ayarlar.saat-dilimi", "Europe/Istanbul");
-        try {
-            return ZoneId.of(z);
-        } catch (Exception e) {
-            return ZoneId.of("Europe/Istanbul");
-        }
+        EventSession s = session;
+        return s == null || s.def.spawn == null ? null : s.def.spawn.toLocation();
     }
 
     // ------------------------------------------------------------------ yardımcılar
@@ -148,11 +138,11 @@ public final class EventManager {
         return l;
     }
 
-    private List<Player> onlineParticipants(boolean activeOnly) {
+    private List<Player> onlineParticipants() {
         List<Player> out = new ArrayList<>();
         if (session == null) return out;
         for (Participant pt : session.participants.values()) {
-            if (activeOnly && !pt.active()) continue;
+            if (!pt.active()) continue;
             Player p = online(pt.uuid);
             if (p != null) out.add(p);
         }
@@ -160,24 +150,27 @@ public final class EventManager {
     }
 
     private void tellParticipants(String key, Object... ph) {
-        msg.sendTo(onlineParticipants(true), key, ph);
+        msg.sendTo(onlineParticipants(), key, ph);
     }
 
-    /** Eşyaları veritabanından iade eder ve hub'a gönderir. */
-    public void restoreAndHub(Player p) {
-        UUID u = p.getUniqueId();
-        String data = plugin.database().getBackup(u);
-        PlayerUtil.reset(p, true);
-        if (data != null) {
-            if (PlayerBackup.apply(p, data, plugin.getLogger())) {
-                plugin.database().deleteBackup(u);
-            } else {
-                plugin.getLogger().severe(p.getName() + " icin yedek uygulanamadi, veritabaninda saklanmaya devam ediyor.");
-            }
+    /** Oyuncuyu eventten çıkarır: kit silinir, eski oyun modu geri verilir, hub'a gönderilir. */
+    private void release(Player p, GameMode gm) {
+        PlayerUtil.reset(p);
+        if (gm != null && p.getGameMode() != gm) p.setGameMode(gm);
+        teleport(p, hub());
+    }
+
+    /** Ölü ise doğunca, değilse hemen çıkarır. Çevrimdışı ise bir şey yapmaz (girişte kit silinir). */
+    private void releaseLater(Participant pt) {
+        Player p = online(pt.uuid);
+        if (p == null) return;
+        if (p.isDead()) {
+            Location h = hub();
+            if (h != null) respawnTo.put(pt.uuid, h);
+            releaseAfterRespawn.put(pt.uuid, pt.gameMode);
+        } else {
+            release(p, pt.gameMode);
         }
-        Location h = hub();
-        if (h == null && data != null) h = PlayerBackup.location(data);
-        teleport(p, h);
     }
 
     // ------------------------------------------------------------------ zamanlayıcı
@@ -185,28 +178,32 @@ public final class EventManager {
     private void tick() {
         try {
             checkSchedule();
-            if (session == null) return;
-            if (session.phase == EventSession.Phase.JOIN) tickJoin();
-            else if (session.phase == EventSession.Phase.RUNNING) tickRunning();
+            EventSession s = session;
+            if (s == null) return;
+            if (s.phase == EventSession.Phase.JOIN) tickJoin(s);
+            else if (s.phase == EventSession.Phase.RUNNING) tickRunning(s);
         } catch (Throwable t) {
-            plugin.getLogger().log(java.util.logging.Level.SEVERE, "Event zamanlayici hatasi", t);
+            plugin.getLogger().log(Level.SEVERE, "Event zamanlayici hatasi", t);
         }
     }
 
     private void checkSchedule() {
-        ZonedDateTime now = ZonedDateTime.now(zone());
+        ZonedDateTime now = ZonedDateTime.now(cfg().zone);
+        int minute = now.getHour() * 60 + now.getMinute();
+        if (minute == lastScheduleMinute) return; // dakikada bir kontrol yeterli
+        lastScheduleMinute = minute;
         String hm = String.format("%02d:%02d", now.getHour(), now.getMinute());
+        EventDef def = plugin.store().event(hm);
+        if (def == null) return;
         String today = now.toLocalDate().toString();
-        for (EventDef def : plugin.store().events.values()) {
-            if (!def.time.equals(hm) || today.equals(def.lastRunDate)) continue;
-            def.lastRunDate = today;
-            plugin.store().save();
-            if (session != null) {
-                plugin.getLogger().warning(def.time + " eventi atlandi: zaten aktif bir event var (" + session.def.time + ").");
-                continue;
-            }
-            open(def, null);
+        if (today.equals(def.lastRunDate)) return;
+        def.lastRunDate = today;
+        plugin.store().save();
+        if (session != null) {
+            plugin.getLogger().warning(def.time + " eventi atlandi: zaten aktif bir event var (" + session.def.time + ").");
+            return;
         }
+        open(def, null);
     }
 
     /** Katılımı açar. by == null ise otomatik (zamanlanmış). */
@@ -225,48 +222,57 @@ public final class EventManager {
             plugin.getLogger().warning(def.time + " eventi acilamadi. Eksikler: " + m);
             return false;
         }
-        int join = Math.max(10, cfgInt("katilim-suresi", 300));
-        session = new EventSession(def, join);
-        msg.broadcast("event-acildi", "saat", def.time, "sure", TimeUtil.formatDuration(join));
+        def.taggedKit(); // kiti bir kez hazırla
+        session = new EventSession(def, cfg().joinSeconds);
+        msg.broadcast("event-acildi", "saat", def.time, "sure", TimeUtil.formatDuration(cfg().joinSeconds));
         msg.broadcastJoinButton();
-        for (Player p : Bukkit.getOnlinePlayers()) PlayerUtil.sound(p, "event-acildi");
+        for (Player p : Bukkit.getOnlinePlayers()) PlayerUtil.sound(p, cfg(), "event-acildi");
         return true;
     }
 
-    private void tickJoin() {
-        EventSession s = session;
+    private void tickJoin(EventSession s) {
         if (s.joinLeft <= 0) {
             beginTournament();
             return;
         }
         int left = s.joinLeft;
-        if (left != s.joinTotal && plugin.getConfig().getIntegerList("ayarlar.geri-sayim-duyurulari").contains(left)) {
-            msg.broadcast("katilim-geri-sayim", "sure", TimeUtil.formatDuration(left), "sayi", s.participants.size());
+        String sure = TimeUtil.formatDuration(left);
+        if (left != s.joinTotal && cfg().announce.contains(left)) {
+            msg.broadcast("katilim-geri-sayim", "sure", sure, "sayi", s.participants.size());
             if (left >= 10) msg.broadcastJoinButton();
-            for (Player p : Bukkit.getOnlinePlayers()) PlayerUtil.sound(p, "geri-sayim");
+            for (Player p : Bukkit.getOnlinePlayers()) PlayerUtil.sound(p, cfg(), "geri-sayim");
         }
-        for (Player p : onlineParticipants(true)) {
-            msg.actionBar(p, "katilim-actionbar", "sure", TimeUtil.formatDuration(left), "sayi", s.participants.size());
+        for (Player p : onlineParticipants()) {
+            enforceEmpty(p);
+            msg.actionBar(p, "katilim-actionbar", "sure", sure, "sayi", s.participants.size());
         }
         s.joinLeft--;
     }
 
-    private void tickRunning() {
-        EventSession s = session;
+    private void tickRunning(EventSession s) {
         for (Match m : new ArrayList<>(s.matches.values())) {
             if (session != s) return;
             tickMatch(m);
         }
         if (session != s) return;
         int alive = s.aliveCount();
+        int round = Math.max(1, s.round);
+        int matches = s.matches.size();
         int queued = s.queue.size();
         for (Participant pt : s.participants.values()) {
             if (pt.state != State.WAITING && pt.state != State.QUEUED) continue;
             Player p = online(pt.uuid);
-            if (p != null) {
-                msg.actionBar(p, "bekleme-actionbar", "tur", Math.max(1, s.round), "kalan", alive,
-                        "mac", s.matches.size(), "sira", queued);
-            }
+            if (p == null) continue;
+            enforceEmpty(p);
+            msg.actionBar(p, "bekleme-actionbar", "tur", round, "kalan", alive, "mac", matches, "sira", queued);
+        }
+    }
+
+    /** Bekleme alanında envanter boş kalır: sistem dışı gelen her eşya silinir. */
+    private void enforceEmpty(Player p) {
+        if (!PlayerUtil.isInventoryEmpty(p)) {
+            PlayerUtil.clearInventory(p);
+            p.updateInventory();
         }
     }
 
@@ -276,52 +282,37 @@ public final class EventManager {
         EventSession s = session;
         if (s == null) {
             msg.send(p, "event-aktif-degil");
-            Object[] next = TimeUtil.next(plugin.store().events.keySet(), zone());
+            Object[] next = TimeUtil.next(plugin.store().events.keySet(), cfg().zone);
             if (next != null) msg.send(p, "sonraki-event", "saat", next[0], "sure", TimeUtil.formatDuration((Long) next[1]));
             return;
         }
         if (s.phase != EventSession.Phase.JOIN) {
-            if (participant(p) != null) msg.send(p, "zaten-katildin");
-            else msg.send(p, "event-devam-ediyor");
+            msg.send(p, participant(p) != null ? "zaten-katildin" : "event-devam-ediyor");
             return;
         }
         UUID u = p.getUniqueId();
-        if (s.get(u) != null) {
+        if (s.participants.containsKey(u)) {
             msg.send(p, "zaten-katildin");
             return;
         }
         if (p.isDead()) return;
-        Location spawn = s.def.spawn == null ? null : s.def.spawn.toLocation();
+        if (!PlayerUtil.isInventoryEmpty(p)) {
+            msg.send(p, "envanter-bos-degil");
+            return;
+        }
+        Location spawn = s.def.spawn.toLocation();
         if (spawn == null) {
             msg.send(p, "konum-hatasi");
             return;
         }
-        // önceki eventten iade edilmemiş yedek varsa önce onu iade et (eşya kaybı olmaz)
-        String stale = plugin.database().getBackup(u);
-        if (stale != null) {
-            PlayerUtil.reset(p, true);
-            if (PlayerBackup.apply(p, stale, plugin.getLogger())) plugin.database().deleteBackup(u);
-            else {
-                msg.send(p, "veritabani-hatasi");
-                return;
-            }
-        }
-        if (cfgBool("envanter-bos-olmali", false) && !PlayerUtil.isInventoryEmpty(p)) {
-            msg.send(p, "envanter-bos-olmali");
-            return;
-        }
-        String data = PlayerBackup.capture(p);
-        if (!plugin.database().saveBackup(u, p.getName(), data)) {
-            msg.send(p, "veritabani-hatasi");
-            return;
-        }
-        PlayerUtil.reset(p, true);
+        GameMode gm = p.getGameMode();
+        PlayerUtil.reset(p);
         if (!teleport(p, spawn)) {
-            restoreAndHub(p);
+            if (p.getGameMode() != gm) p.setGameMode(gm);
             msg.send(p, "konum-hatasi");
             return;
         }
-        s.participants.put(u, new Participant(u, p.getName()));
+        s.participants.put(u, new Participant(u, p.getName(), gm));
         msg.send(p, "katildin");
         tellParticipants("katildi", "player", p.getName(), "sayi", s.participants.size());
     }
@@ -334,8 +325,8 @@ public final class EventManager {
             return;
         }
         if (s.phase == EventSession.Phase.JOIN) {
-            s.participants.remove(p.getUniqueId());
-            restoreAndHub(p);
+            s.participants.remove(pt.uuid);
+            release(p, pt.gameMode);
             msg.send(p, "ayrildin");
             tellParticipants("ayrildi", "player", p.getName(), "sayi", s.participants.size());
             return;
@@ -351,15 +342,16 @@ public final class EventManager {
     public void handleQuit(Player p) {
         UUID u = p.getUniqueId();
         respawnTo.remove(u);
-        restoreAfterRespawn.remove(u);
+        releaseAfterRespawn.remove(u);
         resetAfterRespawn.remove(u);
         EventSession s = session;
         Participant pt = participant(p);
         if (s == null || pt == null) return;
         quitting.add(u);
         try {
-            // kit eşyaları oyuncu verisine kaydedilmesin; gerçek eşyalar veritabanında, girişte iade edilir
-            p.getInventory().clear();
+            // kit eşyası oyuncu verisine kaydedilmesin
+            PlayerUtil.clearInventory(p);
+            if (pt.gameMode != null && p.getGameMode() != pt.gameMode) p.setGameMode(pt.gameMode);
             if (s.phase == EventSession.Phase.JOIN) {
                 s.participants.remove(u);
                 tellParticipants("ayrildi", "player", p.getName(), "sayi", s.participants.size());
@@ -376,21 +368,9 @@ public final class EventManager {
         }
     }
 
-    /** Girişte: iade edilmemiş yedeği varsa iade et ve hub'a gönder. */
+    /** Girişte kit eşyalarını sil (sunucu çökmesi sonrası sızıntı güvenliği). */
     public void handleJoin(Player p) {
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (!p.isOnline()) return;
-            if (participant(p) != null) return;
-            if (!plugin.database().hasBackup(p.getUniqueId())) return;
-            if (p.isDead()) {
-                Location h = hub();
-                if (h != null) respawnTo.put(p.getUniqueId(), h);
-                restoreAfterRespawn.add(p.getUniqueId());
-                return;
-            }
-            restoreAndHub(p);
-            msg.send(p, "esyalar-iade");
-        }, 10L);
+        PlayerUtil.stripKitItems(p);
     }
 
     // ------------------------------------------------------------------ turnuva akışı
@@ -399,15 +379,14 @@ public final class EventManager {
         EventSession s = session;
         s.participants.values().removeIf(pt -> online(pt.uuid) == null);
         int n = s.participants.size();
-        int min = Math.max(2, cfgInt("minimum-oyuncu", 2));
-        if (n < min) {
-            msg.broadcast("yetersiz-oyuncu", "sayi", n, "min", min);
+        if (n < cfg().minPlayers) {
+            msg.broadcast("yetersiz-oyuncu", "sayi", n, "min", cfg().minPlayers);
             stop(null);
             return;
         }
         s.phase = EventSession.Phase.RUNNING;
         msg.broadcast("turnuva-basladi", "saat", s.def.time, "sayi", n);
-        startRoundLater(Math.max(1, cfgInt("ilk-tur-bekleme", 5)));
+        startRoundLater(cfg().firstRoundDelay);
     }
 
     private void startRoundLater(int seconds) {
@@ -434,8 +413,8 @@ public final class EventManager {
         s.round++;
         Collections.shuffle(alive);
         Participant bye = null;
-        if (alive.size() % 2 == 1) {
-            // bay: en az bay geçmiş oyunculardan rastgele biri (aynı kişi sürekli bay geçmesin)
+        if ((alive.size() & 1) == 1) {
+            // tek kalan: en az bekleyenlerden rastgele biri (aynı kişi üst üste beklemez)
             int minByes = Integer.MAX_VALUE;
             for (Participant pt : alive) minByes = Math.min(minByes, pt.byes);
             List<Participant> cands = new ArrayList<>();
@@ -457,10 +436,8 @@ public final class EventManager {
         if (bye != null) {
             Player bp = online(bye.uuid);
             if (bp != null) msg.send(bp, "bay-gecti");
-            tellParticipants("bay-duyuru", "player", bye.name);
         }
         dispatch();
-        // boş oda yoksa sıradakilere bilgi ver
         for (UUID[] pair : s.queue) {
             for (UUID u : pair) {
                 Player p = online(u);
@@ -488,13 +465,13 @@ public final class EventManager {
             Room room = freeRoom(s);
             if (room == null) break;
             s.queue.poll();
-            startMatch(room, pa, pb);
+            startMatch(s, room, pa, pb);
             if (session != s) return;
         }
         if (s.queue.isEmpty() && s.matches.isEmpty()) {
-            int wait = Math.max(1, cfgInt("tur-arasi-bekleme", 5));
-            if (s.round > 0 && s.aliveCount() > 1) tellParticipants("tur-bitti", "tur", s.round, "sure", wait);
-            startRoundLater(s.aliveCount() > 1 ? wait : 1);
+            int alive = s.aliveCount();
+            if (s.round > 0 && alive > 1) tellParticipants("tur-bitti", "tur", s.round, "sure", cfg().roundDelay);
+            startRoundLater(alive > 1 ? cfg().roundDelay : 1);
         }
     }
 
@@ -505,40 +482,34 @@ public final class EventManager {
     }
 
     private Room freeRoom(EventSession s) {
-        List<Room> rooms = new ArrayList<>(s.def.rooms.values());
-        Collections.shuffle(rooms);
-        for (Room r : rooms) {
-            if (s.matches.containsKey(r.key())) continue;
-            if (r.isReady()) return r;
+        List<Room> free = new ArrayList<>();
+        for (Room r : s.def.rooms.values()) {
+            if (!s.matches.containsKey(r.key()) && r.isReady()) free.add(r);
         }
-        return null;
+        return free.isEmpty() ? null : free.get(ThreadLocalRandom.current().nextInt(free.size()));
     }
 
-    private void startMatch(Room room, Participant pa, Participant pb) {
-        EventSession s = session;
-        Player a = online(pa.uuid);
-        Player b = online(pb.uuid);
-        Location la = room.spawn(1);
-        Location lb = room.spawn(2);
-        Match m = new Match(room, pa, pb, Math.max(0, cfgInt("mac-geri-sayim", 3)));
+    private void startMatch(EventSession s, Room room, Participant pa, Participant pb) {
+        Match m = new Match(room, pa, pb, cfg().countdown);
         s.matches.put(room.key(), m);
-        Object[][] sides = {{pa, a, la, pb.name}, {pb, b, lb, pa.name}};
-        for (Object[] side : sides) {
-            Participant pt = (Participant) side[0];
-            Player p = (Player) side[1];
-            pt.state = State.IN_MATCH;
-            pt.match = m;
-            pt.matchesPlayed++;
-            PlayerUtil.reset(p, true);
-            teleport(p, (Location) side[2]);
-            PlayerUtil.applyKit(p, s.def.kit);
-            msg.send(p, "mac-basliyor", "rakip", side[3], "oda", room.name);
-        }
+        ItemStack[] kit = s.def.taggedKit();
+        prepare(online(pa.uuid), pa, m, room.spawn(1), kit, pb.name, room.name);
+        prepare(online(pb.uuid), pb, m, room.spawn(2), kit, pa.name, room.name);
         tellParticipants("mac-duyuru", "a", pa.name, "b", pb.name, "oda", room.name);
         if (m.countdown == 0) {
             m.started = true;
-            m.timeLeft = cfgInt("mac-max-sure", 180);
+            m.timeLeft = cfg().maxDuration;
         }
+    }
+
+    private void prepare(Player p, Participant pt, Match m, Location spawn, ItemStack[] kit, String rival, String room) {
+        pt.state = State.IN_MATCH;
+        pt.match = m;
+        pt.matchesPlayed++;
+        PlayerUtil.reset(p);
+        teleport(p, spawn);
+        PlayerUtil.applyKit(p, kit);
+        msg.send(p, "mac-basliyor", "rakip", rival, "oda", room);
     }
 
     private void tickMatch(Match m) {
@@ -550,20 +521,20 @@ public final class EventManager {
             if (m.countdown > 0) {
                 msg.title(a, "geri-sayim-title", "geri-sayim-subtitle", 0, 25, 0, "sayi", m.countdown, "rakip", m.bName);
                 msg.title(b, "geri-sayim-title", "geri-sayim-subtitle", 0, 25, 0, "sayi", m.countdown, "rakip", m.aName);
-                PlayerUtil.sound(a, "geri-sayim");
-                PlayerUtil.sound(b, "geri-sayim");
+                PlayerUtil.sound(a, cfg(), "geri-sayim");
+                PlayerUtil.sound(b, cfg(), "geri-sayim");
                 m.countdown--;
             } else {
                 m.started = true;
-                m.timeLeft = cfgInt("mac-max-sure", 180);
+                m.timeLeft = cfg().maxDuration;
                 for (Player p : new Player[]{a, b}) {
                     msg.title(p, "basla-title", "basla-subtitle", 0, 20, 10);
-                    PlayerUtil.sound(p, "mac-basladi");
+                    PlayerUtil.sound(p, cfg(), "mac-basladi");
                 }
             }
             return;
         }
-        if (cfgInt("mac-max-sure", 180) <= 0) return;
+        if (cfg().maxDuration <= 0) return;
         m.timeLeft--;
         if (m.timeLeft > 0 && m.timeLeft <= 10) {
             msg.actionBar(a, "sure-actionbar", "sure", m.timeLeft);
@@ -576,9 +547,9 @@ public final class EventManager {
     private void timeout(Match m, Player a, Player b) {
         double ra = a.getHealth() / a.getMaxHealth();
         double rb = b.getHealth() / b.getMaxHealth();
-        UUID winner;
-        if (Math.abs(ra - rb) < 1e-6) winner = ThreadLocalRandom.current().nextBoolean() ? m.a : m.b;
-        else winner = ra > rb ? m.a : m.b;
+        UUID winner = Math.abs(ra - rb) < 1e-6
+                ? (ThreadLocalRandom.current().nextBoolean() ? m.a : m.b)
+                : (ra > rb ? m.a : m.b);
         msg.send(a, "zaman-asimi");
         msg.send(b, "zaman-asimi");
         finishMatch(m, winner, m.opponent(winner), Reason.TIMEOUT);
@@ -594,7 +565,7 @@ public final class EventManager {
         Player wp = online(winner);
         Player lp = online(loser);
         boolean countKill = reason == Reason.DEATH
-                || ((reason == Reason.QUIT || reason == Reason.LEAVE) && cfgBool("cikis-kill-sayilsin", false));
+                || ((reason == Reason.QUIT || reason == Reason.LEAVE) && cfg().killOnQuit);
         if (pw != null && countKill) pw.kills++;
         String sebep = msg.get(switch (reason) {
             case DEATH -> "sebep-olum";
@@ -602,23 +573,21 @@ public final class EventManager {
             case LEAVE -> "sebep-ayrildi";
             case TIMEOUT -> "sebep-sure";
         });
-        String wName = pw != null ? pw.name : "?";
-        String lName = pl != null ? pl.name : "?";
-        tellParticipants("mac-sonucu", "kazanan", wName, "kaybeden", lName, "oda", m.room.name, "sebep", sebep);
+        tellParticipants("mac-sonucu", "kazanan", pw != null ? pw.name : "?", "kaybeden", pl != null ? pl.name : "?",
+                "oda", m.room.name, "sebep", sebep);
         if (pl != null) {
             if (lp != null) {
                 msg.title(lp, "kaybettin-title", "kaybettin-subtitle", 5, 40, 10);
-                PlayerUtil.sound(lp, "kaybettin");
+                PlayerUtil.sound(lp, cfg(), "kaybettin");
             }
             eliminate(pl, lp, reason == Reason.DEATH, reason == Reason.LEAVE ? "ayrildin" : "elendin");
         }
         if (wp != null && !wp.isDead()) {
             msg.title(wp, "kazandin-title", "kazandin-subtitle", 5, 40, 10);
-            PlayerUtil.sound(wp, "kazandin");
+            PlayerUtil.sound(wp, cfg(), "kazandin");
             wp.setFireTicks(0);
         }
-        int delay = Math.max(1, cfgInt("mac-sonu-bekleme", 3));
-        Bukkit.getScheduler().runTaskLater(plugin, () -> finalizeMatch(s, m), delay * 20L);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> finalizeMatch(s, m), cfg().endDelay * 20L);
     }
 
     private void finalizeMatch(EventSession s, Match m) {
@@ -629,11 +598,10 @@ public final class EventManager {
             pw.match = null;
             pw.state = State.WAITING;
             if (wp != null && !wp.isDead()) {
-                PlayerUtil.reset(wp, true);
+                PlayerUtil.reset(wp);
                 teleport(wp, eventSpawn());
                 msg.send(wp, "tura-yukseldin");
             }
-            // ölü ise doğunca resetAfterRespawn ile bekleme alanına gelir
         }
         restoreRoom(m);
         s.matches.remove(m.room.key());
@@ -650,10 +618,10 @@ public final class EventManager {
             b.setBlockData(e.getValue(), false);
         }
         m.changes.clear();
-        var r = m.room.region;
+        Region r = m.room.region;
         BoundingBox box = new BoundingBox(r.minX, r.minY, r.minZ, r.maxX + 1, r.maxY + 1, r.maxZ + 1);
         for (Entity e : w.getNearbyEntities(box)) {
-            if (e instanceof Player || e instanceof LivingEntity || e instanceof Hanging) continue;
+            if (e instanceof LivingEntity || e instanceof Hanging) continue;
             e.remove();
         }
     }
@@ -670,9 +638,9 @@ public final class EventManager {
             if (died || p.isDead()) {
                 Location h = hub();
                 if (h != null) respawnTo.put(pt.uuid, h);
-                restoreAfterRespawn.add(pt.uuid);
+                releaseAfterRespawn.put(pt.uuid, pt.gameMode);
             } else {
-                restoreAndHub(p);
+                release(p, pt.gameMode);
             }
         }
         if (s.phase == EventSession.Phase.RUNNING) {
@@ -685,7 +653,7 @@ public final class EventManager {
         s.phase = EventSession.Phase.ENDED;
         if (champion == null) {
             msg.broadcast("kazanan-yok");
-            plugin.database().saveHistory(s.def.time, s.participants.size(), null, "");
+            plugin.store().addHistory(s.def.time, s.participants.size(), null);
             session = null;
             return;
         }
@@ -698,14 +666,11 @@ public final class EventManager {
                 .thenComparing((Participant p) -> p.kills, Comparator.reverseOrder())
                 .thenComparing((Participant p) -> p.eliminationIndex, Comparator.reverseOrder()));
 
-        int show = Math.max(1, cfgInt("sonuc-gosterilecek", 3));
         List<String> lines = new ArrayList<>(msg.list("sonuc-baslik", "saat", s.def.time, "sayi", ranking.size()));
-        StringBuilder results = new StringBuilder();
-        for (int i = 0; i < ranking.size(); i++) {
+        int show = Math.min(cfg().showTop, ranking.size());
+        for (int i = 0; i < show; i++) {
             Participant p = ranking.get(i);
-            if (i < show) lines.add(msg.get("sonuc-satir", "sira", i + 1, "player", p.name, "kill", p.kills));
-            if (results.length() > 0) results.append(';');
-            results.append(i + 1).append(':').append(p.name).append(':').append(p.kills);
+            lines.add(msg.get("sonuc-satir", "sira", i + 1, "player", p.name, "kill", p.kills));
         }
         lines.addAll(msg.list("sonuc-alt", "saat", s.def.time, "sayi", ranking.size()));
         for (Player p : Bukkit.getOnlinePlayers()) for (String l : lines) p.sendMessage(l);
@@ -714,15 +679,14 @@ public final class EventManager {
         Player cp = online(champion.uuid);
         if (cp != null) {
             msg.title(cp, "sampiyon-title", "sampiyon-subtitle", 10, 60, 20, "player", champion.name);
-            PlayerUtil.sound(cp, "sampiyon");
+            PlayerUtil.sound(cp, cfg(), "sampiyon");
         }
-        plugin.database().saveHistory(s.def.time, ranking.size(), champion.name, results.toString());
+        plugin.store().addHistory(s.def.time, ranking.size(), champion.name);
 
-        // ödüller
         for (int i = 0; i < ranking.size(); i++) {
             Participant p = ranking.get(i);
-            List<String> cmds = new ArrayList<>(plugin.getConfig().getStringList("oduller." + (i + 1)));
-            if (p.matchesPlayed > 0 || p.champion) cmds.addAll(plugin.getConfig().getStringList("katilim-odulu"));
+            List<String> cmds = new ArrayList<>(cfg().rewards.getOrDefault(i + 1, Collections.emptyList()));
+            if (p.matchesPlayed > 0) cmds.addAll(cfg().participationReward);
             for (String c : cmds) {
                 String cmd = c.replace("%player%", p.name).replace("%sira%", String.valueOf(i + 1))
                         .replace("%kill%", String.valueOf(p.kills));
@@ -734,28 +698,15 @@ public final class EventManager {
                 }
             }
         }
-        // kalan herkesi (şampiyon) iade et
         session = null;
         for (Participant pt : s.participants.values()) {
             if (pt.state == State.ELIMINATED) continue;
             pt.state = State.ELIMINATED;
-            returnPlayer(pt.uuid);
+            releaseLater(pt);
         }
     }
 
-    private void returnPlayer(UUID u) {
-        Player p = online(u);
-        if (p == null) return; // çevrimdışı: girişte iade edilir
-        if (p.isDead()) {
-            Location h = hub();
-            if (h != null) respawnTo.put(u, h);
-            restoreAfterRespawn.add(u);
-        } else {
-            restoreAndHub(p);
-        }
-    }
-
-    /** Eventi durdurur, odaları onarır, herkesin eşyasını iade eder. messageKey null ise mesaj yok. */
+    /** Eventi durdurur, odaları onarır, herkesi çıkarır. messageKey null ise mesaj yok. */
     public void stop(String messageKey) {
         EventSession s = session;
         if (s == null) return;
@@ -770,7 +721,7 @@ public final class EventManager {
         for (Participant pt : s.participants.values()) {
             if (pt.state == State.ELIMINATED) continue;
             pt.state = State.ELIMINATED;
-            returnPlayer(pt.uuid);
+            releaseLater(pt);
         }
         if (messageKey != null) msg.broadcast(messageKey);
     }
@@ -787,17 +738,17 @@ public final class EventManager {
         e.setDroppedExp(0);
         e.setKeepInventory(false);
         e.setKeepLevel(true);
-        if (cfgBool("olum-mesaji-gizle", true)) e.setDeathMessage(null);
+        if (cfg().hideDeath) e.setDeathMessage(null);
         UUID u = p.getUniqueId();
         if (s.phase == EventSession.Phase.JOIN) {
             s.participants.remove(u);
             Location h = hub();
             if (h != null) respawnTo.put(u, h);
-            restoreAfterRespawn.add(u);
+            releaseAfterRespawn.put(u, pt.gameMode);
         } else if (pt.state == State.IN_MATCH && pt.match != null && !pt.match.ended) {
             finishMatch(pt.match, pt.match.opponent(u), u, Reason.DEATH);
         } else if (pt.state == State.IN_MATCH && pt.match != null) {
-            // maçı kazandıktan hemen sonra öldü (yanma vb.) -> elenmez, bekleme alanında doğar
+            // maçı kazandıktan hemen sonra öldü (yanma vb.): elenmez, bekleme alanında doğar
             Location sp = eventSpawn();
             if (sp != null) respawnTo.put(u, sp);
             resetAfterRespawn.add(u);
@@ -815,31 +766,31 @@ public final class EventManager {
         UUID u = p.getUniqueId();
         Location to = respawnTo.remove(u);
         if (to != null) e.setRespawnLocation(to);
-        boolean restore = restoreAfterRespawn.remove(u);
+        boolean release = releaseAfterRespawn.containsKey(u);
+        GameMode gm = releaseAfterRespawn.remove(u);
         boolean reset = resetAfterRespawn.remove(u);
-        if (!restore && !reset) return;
+        if (!release && !reset) return;
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if (!p.isOnline()) return;
-            if (restore) {
-                restoreAndHub(p);
+            if (release) {
+                release(p, gm);
+            } else if (participant(p) != null) {
+                PlayerUtil.reset(p);
+                teleport(p, eventSpawn());
             } else {
-                Participant pt = participant(p);
-                if (pt != null) {
-                    PlayerUtil.reset(p, true);
-                    teleport(p, eventSpawn());
-                } else if (plugin.database().hasBackup(u)) {
-                    restoreAndHub(p);
-                }
+                PlayerUtil.reset(p);
+                teleport(p, hub());
             }
         }, 2L);
     }
 
-    // ------------------------------------------------------------------ oda sorguları (dinleyiciler için)
+    // ------------------------------------------------------------------ dinleyiciler için sorgular
 
-    /** Bu bloğu içeren aktif maç */
+    /** Bu bloğu içeren aktif maç. Maç yokken anında null. */
     public Match matchAt(Block b) {
-        if (session == null || session.matches.isEmpty()) return null;
-        for (Match m : session.matches.values()) {
+        EventSession s = session;
+        if (s == null || s.matches.isEmpty()) return null;
+        for (Match m : s.matches.values()) {
             if (m.room.region.contains(b)) return m;
         }
         return null;
@@ -847,14 +798,11 @@ public final class EventManager {
 
     /** Aktif eventin herhangi bir odası bu bloğu içeriyor mu (patlama koruması) */
     public boolean inAnyRoom(Block b) {
-        if (session == null) return false;
-        for (Room r : session.def.rooms.values()) {
+        EventSession s = session;
+        if (s == null) return false;
+        for (Room r : s.def.rooms.values()) {
             if (r.region.contains(b)) return true;
         }
         return false;
-    }
-
-    public boolean cfg(String key, boolean def) {
-        return cfgBool(key, def);
     }
 }

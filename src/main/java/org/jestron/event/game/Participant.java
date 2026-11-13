@@ -25,10 +25,13 @@ public final class Participant {
     public int eliminationIndex = -1;
     public boolean champion;
     public Match match;
+    /** Katılmadan önceki oyun modu (çıkışta geri verilir) */
+    public final org.bukkit.GameMode gameMode;
 
-    public Participant(UUID uuid, String name) {
+    public Participant(UUID uuid, String name, org.bukkit.GameMode gameMode) {
         this.uuid = uuid;
         this.name = name;
+        this.gameMode = gameMode;
     }
 
     public boolean active() {

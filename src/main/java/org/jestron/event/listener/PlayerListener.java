@@ -2,6 +2,7 @@ package org.jestron.event.listener;
 
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
@@ -13,10 +14,13 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.hanging.HangingBreakByEntityEvent;
+import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -32,7 +36,6 @@ import org.jestron.event.game.Participant;
 import org.jestron.event.model.Region;
 import org.jestron.event.util.Text;
 
-import java.util.List;
 
 public final class PlayerListener implements Listener {
 
@@ -46,7 +49,7 @@ public final class PlayerListener implements Listener {
 
     // ------------------------------------------------------------ giriş / çıkış / ölüm
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent e) {
         manager.handleJoin(e.getPlayer());
     }
@@ -140,11 +143,7 @@ public final class PlayerListener implements Listener {
         int colon = label.indexOf(':');
         if (colon >= 0) label = label.substring(colon + 1);
         label = Text.normalize(label);
-        if (label.equals("event") || label.equals("etkinlik")) return;
-        List<String> allowed = plugin.getConfig().getStringList("ayarlar.izinli-komutlar");
-        for (String a : allowed) {
-            if (Text.normalize(a).equals(label)) return;
-        }
+        if (plugin.settings().allowedCommands.contains(label)) return;
         e.setCancelled(true);
         plugin.messages().send(p, "komut-engellendi");
     }
@@ -157,18 +156,32 @@ public final class PlayerListener implements Listener {
         if (t != InventoryType.PLAYER && t != InventoryType.CRAFTING) e.setCancelled(true);
     }
 
+    // eventteyken yere eşya atmak, yerden eşya almak, craft yapmak, varlıklarla etkileşim yasak
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent e) {
-        Participant pt = manager.participant(e.getPlayer());
-        if (pt == null) return;
-        if (!(pt.inLiveMatch() && manager.cfg("mac-esya-atma", false))) e.setCancelled(true);
+        if (manager.participant(e.getPlayer()) != null) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent e) {
-        if (!(e.getEntity() instanceof Player p)) return;
-        Participant pt = manager.participant(p);
-        if (pt != null && pt.state != Participant.State.IN_MATCH) e.setCancelled(true);
+        if (e.getEntity() instanceof Player p && manager.participant(p) != null) e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onCraft(CraftItemEvent e) {
+        if (e.getWhoClicked() instanceof Player p && manager.participant(p) != null) e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onInteractEntity(PlayerInteractEntityEvent e) {
+        if (manager.participant(e.getPlayer()) != null) e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onHangingBreak(HangingBreakByEntityEvent e) {
+        Player p = resolvePlayer(e.getRemover());
+        if (p != null && manager.participant(p) != null) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -193,7 +206,7 @@ public final class PlayerListener implements Listener {
             if (!pt.match.started || pt.match.ended) e.setCancelled(true);
             return;
         }
-        if (!manager.cfg("bekleme-alani-hasar", false)) e.setCancelled(true);
+        if (!plugin.settings().waitingDamage) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -204,8 +217,8 @@ public final class PlayerListener implements Listener {
         Participant pv = victim == null ? null : manager.participant(victim);
         if (pa == null && pv == null) return;
         if (victim == null) {
-            // katılımcı canlı vurmasın (canlı maç dışında)
-            if (pa != null && !pa.inLiveMatch()) e.setCancelled(true);
+            // katılımcı; maç dışında hiçbir varlığa, maçta da canlı olmayan varlıklara (çerçeve vb.) vuramaz
+            if (pa != null && (!pa.inLiveMatch() || !(e.getEntity() instanceof LivingEntity))) e.setCancelled(true);
             return;
         }
         if (attacker == null) {
@@ -217,7 +230,7 @@ public final class PlayerListener implements Listener {
         if (attacker == victim && pa != null && pa.inLiveMatch()) ok = true;
         if (!ok) {
             e.setCancelled(true);
-        } else if (manager.cfg("izinleri-zorla", true)) {
+        } else if (plugin.settings().force) {
             e.setCancelled(false);
         }
     }
@@ -236,6 +249,6 @@ public final class PlayerListener implements Listener {
         if (!(e.getEntity() instanceof Player p)) return;
         Participant pt = manager.participant(p);
         if (pt == null || pt.state == Participant.State.IN_MATCH) return;
-        if (!manager.cfg("bekleme-alani-aclik", false) && e.getFoodLevel() < p.getFoodLevel()) e.setCancelled(true);
+        if (!plugin.settings().waitingHunger && e.getFoodLevel() < p.getFoodLevel()) e.setCancelled(true);
     }
 }

@@ -1,6 +1,7 @@
 package org.jestron.event;
 
 import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -12,10 +13,10 @@ import org.jestron.event.listener.PlayerListener;
 import org.jestron.event.listener.WandListener;
 import org.jestron.event.selection.SelectionService;
 import org.jestron.event.storage.DataStore;
-import org.jestron.event.storage.Database;
 import org.jestron.event.util.Messages;
+import org.jestron.event.util.PlayerUtil;
+import org.jestron.event.util.Settings;
 
-import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -29,9 +30,9 @@ public final class EventPlugin extends JavaPlugin {
 
     private static EventPlugin instance;
 
-    private Messages messages;
+    private final Messages messages = new Messages();
+    private Settings settings;
     private DataStore store;
-    private Database database;
     private SelectionService selection;
     private EventManager manager;
 
@@ -45,16 +46,11 @@ public final class EventPlugin extends JavaPlugin {
         saveDefaultConfig();
         mergeConfigDefaults();
 
-        messages = new Messages(this);
-        store = new DataStore(new File(getDataFolder(), "data.yml"), getLogger());
+        settings = new Settings(getConfig());
+        messages.load(getConfig());
+        PlayerUtil.init(new NamespacedKey(this, "event_kit"));
+        store = new DataStore(this);
         store.load();
-
-        database = new Database(getLogger());
-        if (!database.connect(new File(getDataFolder(), "event.db"))) {
-            getLogger().severe("SQLite baglantisi kurulamadi, eklenti devre disi birakiliyor (oyuncu esyalari riske atilmaz).");
-            Bukkit.getPluginManager().disablePlugin(this);
-            return;
-        }
 
         selection = new SelectionService(this);
         manager = new EventManager(this);
@@ -72,19 +68,18 @@ public final class EventPlugin extends JavaPlugin {
 
         manager.start();
 
-        // /reload veya çökme sonrası: çevrimiçi oyuncuların bekleyen yedeklerini iade et
+        // /reload veya çökme sonrası: üzerinde kalmış kit eşyalarını sil
         for (Player p : Bukkit.getOnlinePlayers()) manager.handleJoin(p);
 
         getLogger().info("Event v" + getDescription().getVersion() + " aktif | " + store.events.size()
                 + " event saati | WorldEdit: " + (selection.hasWorldEdit() ? "var" : "yok (/event wand)")
-                + " | bekleyen yedek: " + database.countBackups());
+        );
     }
 
     @Override
     public void onDisable() {
         if (manager != null) manager.shutdown();
-        if (store != null) store.save();
-        if (database != null) database.close();
+        if (store != null) store.saveNow();
         instance = null;
     }
 
@@ -103,6 +98,8 @@ public final class EventPlugin extends JavaPlugin {
     public void reloadPlugin() {
         reloadConfig();
         mergeConfigDefaults();
+        settings = new Settings(getConfig());
+        messages.load(getConfig());
         if (manager.session() == null) store.load();
     }
 
@@ -114,8 +111,8 @@ public final class EventPlugin extends JavaPlugin {
         return store;
     }
 
-    public Database database() {
-        return database;
+    public Settings settings() {
+        return settings;
     }
 
     public SelectionService selection() {

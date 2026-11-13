@@ -34,6 +34,7 @@ public final class BlockListener implements Listener {
     private final EventManager manager;
 
     public BlockListener(EventPlugin plugin) {
+        this.plugin = plugin;
         this.manager = plugin.manager();
     }
 
@@ -41,8 +42,10 @@ public final class BlockListener implements Listener {
         return pt != null && m != null && pt.match == m && pt.inLiveMatch();
     }
 
+    private final EventPlugin plugin;
+
     private boolean force() {
-        return manager.cfg("izinleri-zorla", true);
+        return plugin.settings().force;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -51,7 +54,7 @@ public final class BlockListener implements Listener {
         Participant pt = manager.participant(p);
         Match m = manager.matchAt(e.getBlockPlaced());
         if (pt != null) {
-            if (isOwnLiveRoom(pt, m) && manager.cfg("oda-blok-koyma", true)) {
+            if (isOwnLiveRoom(pt, m) && plugin.settings().roomPlace) {
                 if (e instanceof BlockMultiPlaceEvent multi) {
                     for (BlockState st : multi.getReplacedBlockStates()) {
                         if (!m.room.region.contains(st.getBlock())) {
@@ -79,7 +82,7 @@ public final class BlockListener implements Listener {
         Participant pt = manager.participant(p);
         Match m = manager.matchAt(b);
         if (pt != null) {
-            if (isOwnLiveRoom(pt, m) && (m.isChanged(b) || manager.cfg("oda-blok-kirma", false))) {
+            if (isOwnLiveRoom(pt, m) && (m.isChanged(b) || plugin.settings().roomBreak)) {
                 m.record(b);
                 e.setDropItems(false);
                 e.setExpToDrop(0);
@@ -98,7 +101,7 @@ public final class BlockListener implements Listener {
         Block target = e.getBlock();
         Match m = manager.matchAt(target);
         if (pt != null) {
-            if (isOwnLiveRoom(pt, m) && manager.cfg("oda-blok-koyma", true)) {
+            if (isOwnLiveRoom(pt, m) && plugin.settings().roomPlace) {
                 m.record(target);
                 if (force()) e.setCancelled(false);
             } else {
@@ -115,7 +118,7 @@ public final class BlockListener implements Listener {
         Block target = e.getBlockClicked();
         Match m = manager.matchAt(target);
         if (pt != null) {
-            if (isOwnLiveRoom(pt, m) && (m.isChanged(target) || manager.cfg("oda-blok-kirma", false))) {
+            if (isOwnLiveRoom(pt, m) && (m.isChanged(target) || plugin.settings().roomBreak)) {
                 m.record(target);
                 if (force()) e.setCancelled(false);
             } else {

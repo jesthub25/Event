@@ -17,6 +17,8 @@ public final class EventDef {
     public Region area;
     public Pos spawn;
     public ItemStack[] kit;
+    /** Kitin etiketli kopyası; kit değişince sıfırlanır. */
+    private ItemStack[] taggedKit;
     public String lastRunDate;
     public final Map<String, Room> rooms = new LinkedHashMap<>();
 
@@ -30,6 +32,16 @@ public final class EventDef {
 
     public Room room(String name) {
         return name == null ? null : rooms.get(name.toLowerCase(Locale.ROOT));
+    }
+
+    public void setKit(ItemStack[] kit) {
+        this.kit = kit;
+        this.taggedKit = null;
+    }
+
+    public ItemStack[] taggedKit() {
+        if (taggedKit == null && kit != null) taggedKit = org.jestron.event.util.PlayerUtil.tagKit(kit);
+        return taggedKit;
     }
 
     public int kitItemCount() {
@@ -55,7 +67,8 @@ public final class EventDef {
         if (spawn == null || spawn.toLocation() == null) m.add("/event setspawn " + time);
         else if (area != null && !area.contains(spawn.toLocation())) m.add("spawn alanın dışında");
         if (kitItemCount() == 0) m.add("/event kit ayarla " + time);
-        if (readyRooms() == 0) m.add("/event oda oluştur <isim> " + time);
+        if (rooms.isEmpty()) m.add("/event oda oluştur <isim> " + time);
+        else if (readyRooms() == 0) m.add("/event oda setspawn1|setspawn2 <oda>");
         return m;
     }
 }

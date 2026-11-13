@@ -1,91 +1,66 @@
-# ⚔ Event — Otomatik 1v1 Turnuva Sistemi
+# ⚔ Event — Otomatik 1v1 Turnuva
 
-Paper/Spigot **1.20.1** tabanlı, **1.20.1 ve üstü tüm sürümlerde** (1.20.x, 1.21.x) çalışan, her gün belirlenen saatte otomatik açılan 1v1 eleme turnuvası eklentisi.
+Paper/Spigot **1.20.1+** (1.20.x, 1.21.x) · Java 17 · Bağımlılık yok (WorldEdit/FAWE isteğe bağlı) · **Jestron**
 
-**Geliştirici:** Jestron · **Java:** 17+ · **Bağımlılık:** Yok (WorldEdit / FastAsyncWorldEdit isteğe bağlı)
+## Akış
 
----
+1. Event her gün ayarlanan saatte (Europe/Istanbul) açılır. Katılım süresi varsayılan 5 dakikadır.
+2. Oyuncu `/event` yazar. **Envanteri tamamen boş olmalıdır** (zırh ve sol el dahil). Boş değilse chat'te uyarılır.
+3. Bekleme alanında eşya alınamaz, atılamaz, craft yapılamaz. Sistem dışından gelen eşyalar anında silinir.
+4. Süre bitince oyuncular rastgele eşleşir. 1. oyuncu odanın **Spawn1**, 2. oyuncu **Spawn2** noktasına ışınlanır ve kitle başlar.
+5. Kazanan bekleme alanına döner. Kaybedenin kiti silinir ve `/event sethub` noktasına gönderilir.
+6. Tek sayı kalırsa biri o turu bekler (aynı kişi üst üste beklemez).
+7. Sonuncu kalan şampiyon olur, chat'te ilk 3 gösterilir: `1. Jestron (6 kill)`
 
-## Nasıl çalışır?
+Sadece `/event` ile katılanlar katılımcıdır. Alana başka yolla gelen biri (op dahil) eventte sayılmaz, katılımcılara vuramaz, onlardan hasar almaz.
 
-1. Yönetici bir event saati oluşturur (örn. `20:00`). Event **her gün** o saatte (varsayılan **Europe/Istanbul**) otomatik açılır.
-2. Açılınca herkese tıklanabilir duyuru gider. Oyuncular **katılım süresi** boyunca (varsayılan **5 dakika**) `/event` yazarak event alanına ışınlanır.
-3. Katılırken oyuncunun **tüm envanteri, zırhı, sol eli, XP'si, canı, açlığı, oyun modu ve efektleri** SQLite veritabanına yedeklenir. Çökme, çıkış veya sunucu kapanmasında bile kaybolmaz.
-4. Süre bitince alandaki oyuncular **rastgele eşleştirilir** ve o event saatine ait **boş odalara** gönderilir. Her maçta iki oyuncu da yöneticinin kaydettiği **kitle, slot slot birebir aynı** şekilde başlar.
-5. **Kazanan** bekleme alanına döner ve sonraki turu bekler. **Kaybeden** eşyalarını geri alır ve `/event sethub` noktasına gönderilir.
-6. Bir turda herkes maçını bitirince kalanlar arasında yeni tur başlar. **Tek sayıda oyuncu** varsa biri o turu **bay** geçer (aynı kişi üst üste bay geçmez).
-7. Son kalan **şampiyon** olur. Sonuçlar herkese chat'te gösterilir:
+## Kurulum
 
-```
-🏆 1v1 EVENT SONUÇLARI (20:00)
-  1. Jestron (6 kill)
-  2. Ahmet (5 kill)
-  3. Mehmet (3 kill)
-```
-
-8. Sıralamaya göre ödül komutları çalıştırılır, kalan herkesin eşyaları iade edilir.
-
-## Kurulum (adım adım)
-
-1. `Event-1.0.0.jar` dosyasını `plugins` klasörüne at, sunucuyu başlat.
-2. `/event oluştur 20:00` — event saatini oluştur.
-3. WorldEdit/FAWE wand ile (yoksa `/event wand`) bekleme alanının iki köşesini seç → `/event alan oluştur 20:00`
-4. Alanın içinde dur, bakış yönünü ayarla → `/event setspawn 20:00`
-5. Elenenlerin gideceği yerde dur → `/event sethub`
-6. Her 1v1 odası için iki köşeyi seç → `/event oda oluştur oda1 20:00` (spawnlar otomatik, karşılıklı ayarlanır)
-   - İstersen elle ayarla: `/event oda spawn oda1 20:00 1` ve `... 2`
-7. Kit envanterini hazırla (zırh, sol el, hotbar dahil) → `/event kit ayarla 20:00`
-8. `/event liste` ile her şeyin ✔ olduğunu kontrol et. Test için: `/event başlat 20:00`
-
-Birden fazla event saati oluşturabilirsin. Her saatin **kendi alanı, spawnı, kiti ve odaları** olur.
+1. `/event oluştur 20:00`
+2. Bekleme alanını seç (WorldEdit/FAWE wand ya da `/event wand`) → `/event alan oluştur 20:00`
+3. Alanın içinde dur → `/event setspawn 20:00`
+4. Elenenlerin gideceği yerde dur → `/event sethub`
+5. Odayı seç → `/event oda oluştur oda1 20:00`
+6. Odanın içinde dur → `/event oda setspawn1 oda1`, sonra öbür uçta `/event oda setspawn2 oda1`
+   (bloğun tam ortası kaydedilir, bakış yönü en yakın ana yöne hizalanır)
+7. Kiti envanterine diz → `/event kit ayarla 20:00`
+8. `/event liste` ile kontrol et, test için `/event başlat 20:00`
 
 ## Komutlar
 
-| Komut | Açıklama |
+| Komut | İş |
 |---|---|
-| `/event` | Açık evente katıl |
-| `/event ayril` | Eventten ayrıl (eşyalar iade) |
-| `/event bilgi` | Event durumu / sonraki event |
-| `/event gecmis` | Son 5 event sonucu |
-| `/event oluştur <saat>` | Event saati oluştur |
-| `/event sil <saat>` | Event saatini ve odalarını sil |
-| `/event liste` | Tüm event saatleri ve eksikleri |
+| `/event` · `/event ayril` | Katıl · ayrıl |
+| `/event bilgi` · `/event gecmis` | Durum · son sonuçlar |
+| `/event oluştur\|sil <saat>` | Event saati |
 | `/event alan oluştur\|sil <saat>` | Bekleme alanı |
-| `/event setspawn [saat]` | `/event` yazınca gidilecek nokta (tam blok + bakış yönü) |
-| `/event sethub` | Elenen / biten oyuncuların gideceği nokta |
-| `/event oda oluştur <isim> <saat>` | Seçimi 1v1 odası yap |
-| `/event oda sil <isim> <saat>` | Odayı sil |
-| `/event oda spawn <isim> <saat> <1\|2>` | Oda spawnını elle ayarla |
-| `/event oda liste [saat]` | Odaları listele |
-| `/event kit ayarla\|al\|sil <saat>` | Kiti envanterinden kaydet / yükle / sil |
-| `/event başlat <saat>` | Eventi beklemeden hemen aç |
-| `/event durdur` | Aktif eventi durdur (herkese iade) |
-| `/event wand` | WorldEdit yoksa seçim çubuğu |
-| `/event reload` | Ayarları yenile |
+| `/event setspawn [saat]` · `/event sethub` | Giriş noktası · çıkış noktası |
+| `/event oda oluştur <isim> <saat>` | Oda (isimler benzersiz) |
+| `/event oda setspawn1\|setspawn2 <oda>` | Oda spawnları (odanın içinde) |
+| `/event oda sil <oda>` · `/event oda liste [saat]` | Sil · listele |
+| `/event kit ayarla\|al\|sil <saat>` | Kit (slot slot) |
+| `/event başlat <saat>` · `/event durdur` | Hemen aç · durdur |
+| `/event wand` · `/event reload` | Seçim çubuğu · yenile |
 
-Türkçe karakterli ve karaktersiz yazımın ikisi de çalışır (`oluştur` / `olustur`, `başlat` / `baslat`). Tüm argümanlarda tab tamamlama vardır.
+Yetkiler: `event.use` (herkes), `event.admin` (op). Tüm argümanlarda tab tamamlama vardır, Türkçe karakterli ve karaktersiz yazım çalışır.
 
-**Yetkiler:** `event.use` (herkes), `event.admin` (op)
+## Koruma
 
-## Güvenlik ve koruma
+- Kit eşyaları görünmez bir etiket taşır. Eventten çıkan, sızan ya da sunucu çökmesinden sonra kalan kit eşyası girişte silinir.
+- Maçta koyulan/kırılan bloklar, su, lav, ateş kaydedilir. Maç bitince oda birebir eski haline döner, yerdeki eşya/ok/xp temizlenir.
+- Geri sayımda hareket, vuruş ve eşya kullanımı yoktur. Alandan ve odadan çıkılamaz, dışarı ışınlanılamaz.
+- Eventte sandık açılamaz, sadece izinli komutlar kullanılabilir.
+- Maç süre sınırı (`mac-max-sure`) dolunca canı yüksek olan kazanır.
 
-- **Eşya güvenliği:** Yedek SQLite'ta tutulur. Oyuncu çıkarsa, sunucu çökerse veya `/reload` yapılırsa, oyuncu tekrar girince eşyaları otomatik iade edilir.
-- **Kit sızıntısı yok:** Maç bitince kit silinir. Ölünce kit düşmez. Maçta sandık / ender sandığı açılamaz. Yere eşya atma varsayılan olarak kapalıdır.
-- **Oda onarımı:** Maçta koyulan / kırılan bloklar, akan su / lav, oluşan obsidyen / taş, ateş kaydedilir ve maç bitince oda **birebir eski haline döner**. Yerdeki eşyalar, oklar ve XP temizlenir.
-- **Hile koruması:** Geri sayımda hareket / vuruş / eşya kullanımı yoktur. Odadan ve alandan dışarı çıkılamaz, dışarı ışınlanılamaz. Event sırasında yalnızca izinli komutlar kullanılabilir. Dışarıdan biri katılımcılara vuramaz.
-- **WorldGuard uyumu:** `izinleri-zorla: true` ise odalardaki PvP / blok koyma, başka eklentiler engellese bile maç içinde açılır.
-- **Süre sınırı:** Maç `mac-max-sure` saniyeyi aşarsa canı yüksek olan kazanır.
+## Performans
 
-## Yapılandırma
-
-Tüm süreler, kurallar, ödüller, sesler ve **bütün mesajlar** `config.yml` üzerinden değiştirilebilir. Event tanımları `data.yml`, yedekler ve geçmiş `event.db` dosyasında tutulur.
+- Ayarlar ve mesajlar önbellekte tutulur; hareket, hasar ve blok olaylarında config okunmaz.
+- Event yokken bütün dinleyiciler tek bir kontrolle çıkar.
+- Zamanlama dakikada bir kontrol edilir, kit event başına bir kez hazırlanır.
+- Dosyaya yazma arka planda tek bir thread'de yapılır, sunucu donmaz. Veritabanı yoktur.
 
 ## Derleme
 
 ```bash
-mvn clean package
-# target/Event-1.0.0.jar
+mvn clean package   # target/Event-<sürüm>.jar
 ```
-
----
-© Jestron — AvenorCraft
