@@ -95,6 +95,7 @@ public final class DataStore {
             def.area = Region.load(s.getConfigurationSection("area"));
             def.spawn = Pos.load(s.getConfigurationSection("spawn"));
             def.lastRunDate = s.getString("last-run");
+            def.maxPlayers = Math.max(0, s.getInt("max-players", 0));
             ConfigurationSection k = s.getConfigurationSection("kit");
             if (k != null) {
                 int size = Math.max(41, s.getInt("kit-size", 41));
@@ -137,6 +138,7 @@ public final class DataStore {
             ConfigurationSection s = ev.createSection(def.key());
             s.set("time", def.time);
             if (def.lastRunDate != null) s.set("last-run", def.lastRunDate);
+            s.set("max-players", def.maxPlayers);
             if (def.area != null) def.area.save(s.createSection("area"));
             if (def.spawn != null) def.spawn.save(s.createSection("spawn"));
             if (def.kit != null) {

@@ -34,7 +34,7 @@ public final class EventCommand implements TabExecutor {
     private static final Pattern ROOM_NAME = Pattern.compile("[A-Za-z0-9_\\-]{1,32}");
     private static final List<String> PLAYER_SUBS = Arrays.asList("katil", "ayril", "bilgi", "gecmis", "yardim");
     private static final List<String> ADMIN_SUBS = Arrays.asList("oluştur", "sil", "liste", "setspawn", "sethub",
-            "alan", "oda", "kit", "başlat", "durdur", "wand", "reload");
+            "alan", "maks", "oda", "kit", "başlat", "durdur", "wand", "reload");
 
     private final EventPlugin plugin;
     private final Messages msg;
@@ -101,6 +101,7 @@ public final class EventCommand implements TabExecutor {
             case "setspawn" -> setSpawn(sender, args);
             case "sethub" -> setHub(sender);
             case "alan" -> area(sender, args);
+            case "maks", "max", "kontenjan" -> maxPlayers(sender, args);
             case "oda" -> room(sender, args);
             case "kit" -> kit(sender, args);
             case "baslat", "start" -> start(sender, args);
@@ -198,7 +199,7 @@ public final class EventCommand implements TabExecutor {
                     "alan", Text.color(yesNo(def.area != null)),
                     "spawn", Text.color(yesNo(def.spawn != null)),
                     "kit", Text.color(yesNo(def.kitItemCount() > 0)),
-                    "oda", def.readyRooms() + "/" + def.rooms.size());
+                    "oda", def.readyRooms() + "/" + def.rooms.size(), "maks", def.maxText());
         }
     }
 
@@ -247,7 +248,7 @@ public final class EventCommand implements TabExecutor {
 
     private void area(CommandSender s, String[] args) {
         if (args.length < 3) {
-            msg.send(s, "kullanim", "kullanim", "/event alan oluştur|sil <saat>");
+            msg.send(s, "kullanim", "kullanim", "/event alan oluştur <saat> [maks kişi] | sil <saat>");
             return;
         }
         String action = Text.normalize(args[1]);
@@ -263,9 +264,14 @@ public final class EventCommand implements TabExecutor {
                 if (p == null) return;
                 Region r = requireSelection(p);
                 if (r == null) return;
+                if (args.length >= 4) {
+                    Integer max = parseMax(p, args[3]);
+                    if (max == null) return;
+                    def.maxPlayers = max;
+                }
                 def.area = r;
                 store().save();
-                msg.send(p, "alan-ayarlandi", "saat", def.time, "alan", r.describe());
+                msg.send(p, "alan-ayarlandi", "saat", def.time, "alan", r.describe(), "maks", def.maxText());
                 if (def.spawn != null && !r.contains(def.spawn.toLocation())) {
                     msg.send(p, "spawn-alan-disinda", "saat", def.time);
                 }
@@ -277,6 +283,31 @@ public final class EventCommand implements TabExecutor {
             }
             default -> msg.send(s, "kullanim", "kullanim", "/event alan oluştur|sil <saat>");
         }
+    }
+
+    /** 0 = sınırsız, en az 2. Geçersizse mesaj gönderip null döner. */
+    private Integer parseMax(CommandSender s, String raw) {
+        try {
+            int v = Integer.parseInt(raw);
+            if (v == 0 || (v >= 2 && v <= 1000)) return v;
+        } catch (NumberFormatException ignored) {
+        }
+        msg.send(s, "maks-gecersiz", "deger", raw);
+        return null;
+    }
+
+    private void maxPlayers(CommandSender s, String[] args) {
+        if (args.length < 3) {
+            msg.send(s, "kullanim", "kullanim", "/event maks <saat> <kişi>  (0 = sınırsız)");
+            return;
+        }
+        EventDef def = requireEvent(s, args[1]);
+        if (def == null) return;
+        Integer max = parseMax(s, args[2]);
+        if (max == null) return;
+        def.maxPlayers = max;
+        store().save();
+        msg.send(s, "maks-ayarlandi", "saat", def.time, "maks", def.maxText());
     }
 
     // ------------------------------------------------------------ odalar
@@ -533,11 +564,17 @@ public final class EventCommand implements TabExecutor {
             case "sil", "setspawn", "baslat" -> {
                 if (args.length == 2) out.addAll(times);
             }
+            case "maks" -> {
+                if (args.length == 2) out.addAll(times);
+                else if (args.length == 3) out.addAll(Arrays.asList("0", "8", "16", "32", "64"));
+            }
             case "alan", "kit" -> {
                 if (args.length == 2) {
                     out.addAll(sub.equals("alan") ? Arrays.asList("oluştur", "sil") : Arrays.asList("ayarla", "al", "sil"));
                 } else if (args.length == 3) {
                     out.addAll(times);
+                } else if (args.length == 4 && sub.equals("alan") && Text.normalize(args[1]).equals("olustur")) {
+                    out.addAll(Arrays.asList("<maks kişi>", "0", "8", "16", "32"));
                 }
             }
             case "oda" -> {

@@ -21,6 +21,8 @@ public final class EventSession {
     public int joinLeft;
     public final int joinTotal;
     public int round;
+    /** Bu turdaki dalga numarası */
+    public int wave;
     public boolean roundTransition;
     public int eliminationCounter;
     public final Map<UUID, Participant> participants = new LinkedHashMap<>();

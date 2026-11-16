@@ -7,17 +7,19 @@ Paper/Spigot **1.20.1+** (1.20.x, 1.21.x) · Java 17 · Bağımlılık yok (Worl
 1. Event her gün ayarlanan saatte (Europe/Istanbul) açılır. Katılım süresi varsayılan 5 dakikadır.
 2. Oyuncu `/event` yazar. **Envanteri tamamen boş olmalıdır** (zırh ve sol el dahil). Boş değilse chat'te uyarılır.
 3. Bekleme alanında eşya alınamaz, atılamaz, craft yapılamaz. Sistem dışından gelen eşyalar anında silinir.
-4. Süre bitince oyuncular rastgele eşleşir. 1. oyuncu odanın **Spawn1**, 2. oyuncu **Spawn2** noktasına ışınlanır ve kitle başlar.
-5. Kazanan bekleme alanına döner. Kaybedenin kiti silinir ve `/event sethub` noktasına gönderilir.
-6. Tek sayı kalırsa biri o turu bekler (aynı kişi üst üste beklemez).
-7. Sonuncu kalan şampiyon olur, chat'te ilk 3 gösterilir: `1. Jestron (6 kill)`
+4. Süre bitince oyuncular rastgele eşleşir. Boş odaların hepsi aynı anda doldurulur (1. oyuncu **Spawn1**, 2. oyuncu **Spawn2**), herkesin ekranında 3-2-1 sayılır ve maçlar **aynı anda** başlar.
+5. Oda yetmeyen eşleşmeler bekler. O dalganın bütün maçları bitince sıradakiler toplanır ve yine aynı anda başlatılır.
+6. Kazanan, o event saatinin `/event setspawn` noktasına (bekleme alanı) döner ve eventte kalır. Kaybedenin kiti silinir, `/event sethub` noktasına gönderilir ve eventten çıkarılır.
+7. Tek sayı kalırsa biri o turu bekler (aynı kişi üst üste beklemez).
+8. Kontenjan doluysa yeni katılım kabul edilmez.
+9. Sonuncu kalan şampiyon olur, chat'te ilk 3 gösterilir: `1. Jestron (6 kill)`
 
 Sadece `/event` ile katılanlar katılımcıdır. Alana başka yolla gelen biri (op dahil) eventte sayılmaz, katılımcılara vuramaz, onlardan hasar almaz.
 
 ## Kurulum
 
 1. `/event oluştur 20:00`
-2. Bekleme alanını seç (WorldEdit/FAWE wand ya da `/event wand`) → `/event alan oluştur 20:00`
+2. Bekleme alanını seç (WorldEdit/FAWE wand ya da `/event wand`) → `/event alan oluştur 20:00 16` (16 = en fazla kişi, yazılmazsa sınırsız)
 3. Alanın içinde dur → `/event setspawn 20:00`
 4. Elenenlerin gideceği yerde dur → `/event sethub`
 5. Odayı seç → `/event oda oluştur oda1 20:00`
@@ -33,7 +35,8 @@ Sadece `/event` ile katılanlar katılımcıdır. Alana başka yolla gelen biri 
 | `/event` · `/event ayril` | Katıl · ayrıl |
 | `/event bilgi` · `/event gecmis` | Durum · son sonuçlar |
 | `/event oluştur\|sil <saat>` | Event saati |
-| `/event alan oluştur\|sil <saat>` | Bekleme alanı |
+| `/event alan oluştur <saat> [maks]` · `/event alan sil <saat>` | Bekleme alanı + kontenjan |
+| `/event maks <saat> <kişi>` | Kontenjanı değiştir (0 = sınırsız) |
 | `/event setspawn [saat]` · `/event sethub` | Giriş noktası · çıkış noktası |
 | `/event oda oluştur <isim> <saat>` | Oda (isimler benzersiz) |
 | `/event oda setspawn1\|setspawn2 <oda>` | Oda spawnları (odanın içinde) |

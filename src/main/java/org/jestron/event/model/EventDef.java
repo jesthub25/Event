@@ -20,6 +20,8 @@ public final class EventDef {
     /** Kitin etiketli kopyası; kit değişince sıfırlanır. */
     private ItemStack[] taggedKit;
     public String lastRunDate;
+    /** En fazla katılımcı (0 = sınırsız) */
+    public int maxPlayers;
     public final Map<String, Room> rooms = new LinkedHashMap<>();
 
     public EventDef(String time) {
@@ -51,6 +53,10 @@ public final class EventDef {
             if (it != null && it.getType() != Material.AIR) c++;
         }
         return c;
+    }
+
+    public String maxText() {
+        return maxPlayers > 0 ? String.valueOf(maxPlayers) : "∞";
     }
 
     public int readyRooms() {

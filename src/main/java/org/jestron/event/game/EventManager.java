@@ -224,7 +224,8 @@ public final class EventManager {
         }
         def.taggedKit(); // kiti bir kez hazırla
         session = new EventSession(def, cfg().joinSeconds);
-        msg.broadcast("event-acildi", "saat", def.time, "sure", TimeUtil.formatDuration(cfg().joinSeconds));
+        msg.broadcast("event-acildi", "saat", def.time, "sure", TimeUtil.formatDuration(cfg().joinSeconds),
+                "maks", def.maxText());
         msg.broadcastJoinButton();
         for (Player p : Bukkit.getOnlinePlayers()) PlayerUtil.sound(p, cfg(), "event-acildi");
         return true;
@@ -238,13 +239,13 @@ public final class EventManager {
         int left = s.joinLeft;
         String sure = TimeUtil.formatDuration(left);
         if (left != s.joinTotal && cfg().announce.contains(left)) {
-            msg.broadcast("katilim-geri-sayim", "sure", sure, "sayi", s.participants.size());
+            msg.broadcast("katilim-geri-sayim", "sure", sure, "sayi", s.participants.size(), "maks", s.def.maxText());
             if (left >= 10) msg.broadcastJoinButton();
             for (Player p : Bukkit.getOnlinePlayers()) PlayerUtil.sound(p, cfg(), "geri-sayim");
         }
         for (Player p : onlineParticipants()) {
             enforceEmpty(p);
-            msg.actionBar(p, "katilim-actionbar", "sure", sure, "sayi", s.participants.size());
+            msg.actionBar(p, "katilim-actionbar", "sure", sure, "sayi", s.participants.size(), "maks", s.def.maxText());
         }
         s.joinLeft--;
     }
@@ -296,6 +297,10 @@ public final class EventManager {
             return;
         }
         if (p.isDead()) return;
+        if (s.def.maxPlayers > 0 && s.participants.size() >= s.def.maxPlayers) {
+            msg.send(p, "event-dolu", "maks", s.def.maxPlayers);
+            return;
+        }
         if (!PlayerUtil.isInventoryEmpty(p)) {
             msg.send(p, "envanter-bos-degil");
             return;
@@ -314,7 +319,10 @@ public final class EventManager {
         }
         s.participants.put(u, new Participant(u, p.getName(), gm));
         msg.send(p, "katildin");
-        tellParticipants("katildi", "player", p.getName(), "sayi", s.participants.size());
+        tellParticipants("katildi", "player", p.getName(), "sayi", s.participants.size(), "maks", s.def.maxText());
+        if (s.def.maxPlayers > 0 && s.participants.size() >= s.def.maxPlayers) {
+            msg.broadcast("event-doldu", "saat", s.def.time, "maks", s.def.maxPlayers);
+        }
     }
 
     public void leave(Player p) {
@@ -437,19 +445,24 @@ public final class EventManager {
             Player bp = online(bye.uuid);
             if (bp != null) msg.send(bp, "bay-gecti");
         }
+        s.wave = 0;
         dispatch();
-        for (UUID[] pair : s.queue) {
-            for (UUID u : pair) {
-                Player p = online(u);
-                if (p != null) msg.send(p, "mac-sirada");
-            }
-        }
     }
 
-    /** Sıradaki eşleşmeleri boş odalara yerleştirir; tur bittiyse sonraki turu planlar. */
+    /**
+     * Dalga sistemi: önceki dalganın bütün maçları bitmeden yeni maç başlamaz.
+     * Dalga boşken sıradaki eşleşmeler boş odaların hepsine birden yerleştirilir ve
+     * aynı anda geri sayımla başlar. Oda yetmeyenler bir sonraki dalgaya kalır.
+     * Sıra bitince tur biter ve sonraki tur planlanır.
+     */
     private void dispatch() {
         EventSession s = session;
         if (s == null || s.phase != EventSession.Phase.RUNNING || s.roundTransition) return;
+        if (!s.matches.isEmpty()) return; // dalga sürüyor
+        List<Room> free = new ArrayList<>();
+        for (Room r : s.def.rooms.values()) if (r.isReady()) free.add(r);
+        Collections.shuffle(free);
+        List<Match> wave = new ArrayList<>();
         while (!s.queue.isEmpty()) {
             UUID[] pair = s.queue.peek();
             Participant pa = s.get(pair[0]);
@@ -462,17 +475,32 @@ public final class EventManager {
                 if (okB) walkover(pb);
                 continue;
             }
-            Room room = freeRoom(s);
-            if (room == null) break;
+            if (free.isEmpty()) break;
             s.queue.poll();
-            startMatch(s, room, pa, pb);
+            wave.add(startMatch(s, free.remove(free.size() - 1), pa, pb));
             if (session != s) return;
         }
-        if (s.queue.isEmpty() && s.matches.isEmpty()) {
-            int alive = s.aliveCount();
-            if (s.round > 0 && alive > 1) tellParticipants("tur-bitti", "tur", s.round, "sure", cfg().roundDelay);
-            startRoundLater(alive > 1 ? cfg().roundDelay : 1);
+        if (!wave.isEmpty()) {
+            s.wave++;
+            tellParticipants("dalga-basliyor", "dalga", s.wave, "mac", wave.size(), "sira", s.queue.size());
+            startWaveCountdown(s, wave);
+            for (UUID[] pair : s.queue) {
+                for (UUID u : pair) {
+                    Player p = online(u);
+                    if (p != null) msg.send(p, "mac-sirada");
+                }
+            }
+            return;
         }
+        if (!s.queue.isEmpty()) {
+            // hiç kullanılabilir oda kalmadı (dünya yüklü değil vb.)
+            plugin.getLogger().severe(s.def.time + " eventinde kullanilabilir oda yok, event durduruluyor.");
+            stop("event-durduruldu");
+            return;
+        }
+        int alive = s.aliveCount();
+        if (s.round > 0 && alive > 1) tellParticipants("tur-bitti", "tur", s.round, "sure", cfg().roundDelay);
+        startRoundLater(alive > 1 ? cfg().roundDelay : 1);
     }
 
     private void walkover(Participant pt) {
@@ -481,15 +509,43 @@ public final class EventManager {
         if (p != null) msg.send(p, "rakip-yok");
     }
 
-    private Room freeRoom(EventSession s) {
-        List<Room> free = new ArrayList<>();
-        for (Room r : s.def.rooms.values()) {
-            if (!s.matches.containsKey(r.key()) && r.isReady()) free.add(r);
-        }
-        return free.isEmpty() ? null : free.get(ThreadLocalRandom.current().nextInt(free.size()));
+    /** Dalgadaki bütün maçlar için tek sayaç: herkes aynı saniyede 3-2-1 görür ve aynı anda başlar. */
+    private void startWaveCountdown(EventSession s, List<Match> wave) {
+        if (cfg().countdown <= 0) return; // startMatch zaten başlattı
+        int[] left = {cfg().countdown};
+        BukkitTask[] task = new BukkitTask[1];
+        task[0] = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            if (session != s) {
+                task[0].cancel();
+                return;
+            }
+            for (Match m : wave) {
+                if (m.ended || m.started) continue;
+                Player a = online(m.a);
+                Player b = online(m.b);
+                if (left[0] > 0) {
+                    if (a != null) countdownTitle(a, left[0], m.bName);
+                    if (b != null) countdownTitle(b, left[0], m.aName);
+                } else {
+                    m.started = true;
+                    m.timeLeft = cfg().maxDuration;
+                    for (Player p : new Player[]{a, b}) {
+                        if (p == null) continue;
+                        msg.title(p, "basla-title", "basla-subtitle", 0, 20, 10);
+                        PlayerUtil.sound(p, cfg(), "mac-basladi");
+                    }
+                }
+            }
+            if (left[0]-- <= 0) task[0].cancel();
+        }, 0L, 20L);
     }
 
-    private void startMatch(EventSession s, Room room, Participant pa, Participant pb) {
+    private void countdownTitle(Player p, int n, String rival) {
+        msg.title(p, "geri-sayim-title", "geri-sayim-subtitle", 0, 25, 0, "sayi", n, "rakip", rival);
+        PlayerUtil.sound(p, cfg(), "geri-sayim");
+    }
+
+    private Match startMatch(EventSession s, Room room, Participant pa, Participant pb) {
         Match m = new Match(room, pa, pb, cfg().countdown);
         s.matches.put(room.key(), m);
         ItemStack[] kit = s.def.taggedKit();
@@ -500,6 +556,7 @@ public final class EventManager {
             m.started = true;
             m.timeLeft = cfg().maxDuration;
         }
+        return m;
     }
 
     private void prepare(Player p, Participant pt, Match m, Location spawn, ItemStack[] kit, String rival, String room) {
@@ -517,23 +574,7 @@ public final class EventManager {
         Player a = online(m.a);
         Player b = online(m.b);
         if (a == null || b == null) return;
-        if (!m.started) {
-            if (m.countdown > 0) {
-                msg.title(a, "geri-sayim-title", "geri-sayim-subtitle", 0, 25, 0, "sayi", m.countdown, "rakip", m.bName);
-                msg.title(b, "geri-sayim-title", "geri-sayim-subtitle", 0, 25, 0, "sayi", m.countdown, "rakip", m.aName);
-                PlayerUtil.sound(a, cfg(), "geri-sayim");
-                PlayerUtil.sound(b, cfg(), "geri-sayim");
-                m.countdown--;
-            } else {
-                m.started = true;
-                m.timeLeft = cfg().maxDuration;
-                for (Player p : new Player[]{a, b}) {
-                    msg.title(p, "basla-title", "basla-subtitle", 0, 20, 10);
-                    PlayerUtil.sound(p, cfg(), "mac-basladi");
-                }
-            }
-            return;
-        }
+        if (!m.started) return; // geri sayım dalga sayacında
         if (cfg().maxDuration <= 0) return;
         m.timeLeft--;
         if (m.timeLeft > 0 && m.timeLeft <= 10) {
