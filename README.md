@@ -4,12 +4,13 @@ Paper/Spigot **1.20.1+** (1.20.x, 1.21.x) · Java 17 · Bağımlılık yok (Worl
 
 ## Akış
 
-1. Event her gün ayarlanan saatte (Europe/Istanbul) açılır. Katılım süresi varsayılan 5 dakikadır.
+1. Event saatinden 60, 30, 10, 5 ve 1 dakika önce bütün oyunculara title ile hatırlatma yapılır (`hatirlatma-dakikalari`).
+   Event her gün ayarlanan saatte (Europe/Istanbul) açılır. Katılım süresi varsayılan 5 dakikadır.
 2. Oyuncu `/event` yazar. **Envanteri tamamen boş olmalıdır** (zırh ve sol el dahil). Boş değilse chat'te uyarılır.
 3. Bekleme alanında eşya alınamaz, atılamaz, craft yapılamaz. Sistem dışından gelen eşyalar anında silinir.
 4. Süre bitince oyuncular rastgele eşleşir. Boş odaların hepsi aynı anda doldurulur (1. oyuncu **Spawn1**, 2. oyuncu **Spawn2**), herkesin ekranında 3-2-1 sayılır ve maçlar **aynı anda** başlar.
 5. Oda yetmeyen eşleşmeler bekler. O dalganın bütün maçları bitince sıradakiler toplanır ve yine aynı anda başlatılır.
-6. Kazanan, o event saatinin `/event setspawn` noktasına (bekleme alanı) döner ve eventte kalır. Kaybedenin kiti silinir, `/event sethub` noktasına gönderilir ve eventten çıkarılır.
+6. Kazananın kiti hemen silinir, sonraki eşleşmede kit yeniden eksiksiz verilir. Kazanan, o event saatinin `/event setspawn` noktasına (bekleme alanı) döner ve eventte kalır. Kaybedenin kiti silinir, `/event sethub` noktasına gönderilir ve eventten çıkarılır.
 7. Tek sayı kalırsa biri o turu bekler (aynı kişi üst üste beklemez).
 8. Kontenjan doluysa yeni katılım kabul edilmez.
 9. Sonuncu kalan şampiyon olur, chat'te ilk 3 gösterilir: `1. Jestron (6 kill)`

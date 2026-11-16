@@ -16,6 +16,8 @@ ayarlar:
   mac-sonu-bekleme: 3
   # Katılım süresince duyuru yapılacak saniyeler
   geri-sayim-duyurulari: [240, 180, 120, 60, 30, 15, 10, 5, 4, 3, 2, 1]
+  # Event saatinden kaç dakika önce tüm oyunculara title ile hatırlatma yapılsın
+  hatirlatma-dakikalari: [60, 30, 10, 5, 1]
   bekleme-alani-hasar: false
   bekleme-alani-aclik: false
   # Maçta blok koyma / haritanın bloklarını kırma (maç bitince oda eski haline döner)
@@ -49,6 +51,7 @@ sesler:
   kazandin: "ui.toast.challenge_complete"
   kaybettin: "entity.villager.no"
   sampiyon: "ui.toast.challenge_complete"
+  hatirlatma: "block.note_block.pling"
 
 mesajlar:
   prefix: "&8[&6&l1v1&8] &r"
@@ -58,6 +61,10 @@ mesajlar:
   event-bulunamadi: "%prefix%&e%saat% &cevent'i yok."
   kullanim: "%prefix%&cKullanım: &e%kullanim%"
   reload: "%prefix%&aYenilendi."
+  # --- Hatırlatma (event saatinden önce)
+  hatirlatma-title: "&6&l⚔ 1v1 EVENT"
+  hatirlatma-subtitle: "&e%sure% &fsonra başlıyor &7(%saat%)"
+  hatirlatma-chat: "%prefix%&e%saat% &f1v1 eventi &e%sure% &fsonra! &7Kontenjan %maks% · Envanterini boşalt."
   # --- Katılım
   event-acildi:
     - "&8&m                                        "
@@ -106,7 +113,7 @@ mesajlar:
   sure-actionbar: "&cMaç bitimine &e%sure% &csn"
   zaman-asimi: "%prefix%&eSüre doldu, canı yüksek olan kazandı."
   kazandin-title: "&a&lKAZANDIN"
-  kazandin-subtitle: "&7Sonraki turu bekle"
+  kazandin-subtitle: "&7Kit sonraki maçta yeniden verilecek"
   kaybettin-title: "&c&lELENDİN"
   kaybettin-subtitle: ""
   mac-sonucu: "%prefix%&a%kazanan% &7> &c%kaybeden% &8(%sebep%&8)"

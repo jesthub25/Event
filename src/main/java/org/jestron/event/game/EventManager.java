@@ -192,6 +192,7 @@ public final class EventManager {
         int minute = now.getHour() * 60 + now.getMinute();
         if (minute == lastScheduleMinute) return; // dakikada bir kontrol yeterli
         lastScheduleMinute = minute;
+        sendReminders(minute);
         String hm = String.format("%02d:%02d", now.getHour(), now.getMinute());
         EventDef def = plugin.store().event(hm);
         if (def == null) return;
@@ -204,6 +205,24 @@ public final class EventManager {
             return;
         }
         open(def, null);
+    }
+
+    /** Event saatinden 60/30/10/5/1 dk (config) önce tüm oyunculara title + chat hatırlatması. */
+    private void sendReminders(int nowMinute) {
+        if (cfg().reminders.isEmpty() || Bukkit.getOnlinePlayers().isEmpty()) return;
+        for (EventDef def : plugin.store().events.values()) {
+            String[] hm = def.time.split(":");
+            int eventMinute = Integer.parseInt(hm[0]) * 60 + Integer.parseInt(hm[1]);
+            int diff = Math.floorMod(eventMinute - nowMinute, 1440);
+            if (diff == 0 || !cfg().reminders.contains(diff)) continue;
+            if (!def.missing(plugin.store().hub).isEmpty()) continue; // açılamayacak eventi duyurma
+            String sure = diff % 60 == 0 ? (diff / 60) + " saat" : diff + " dakika";
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                msg.title(p, "hatirlatma-title", "hatirlatma-subtitle", 10, 60, 15, "saat", def.time, "sure", sure);
+                PlayerUtil.sound(p, cfg(), "hatirlatma");
+            }
+            msg.broadcast("hatirlatma-chat", "saat", def.time, "sure", sure, "maks", def.maxText());
+        }
     }
 
     /** Katılımı açar. by == null ise otomatik (zamanlanmış). */
@@ -624,6 +643,8 @@ public final class EventManager {
             eliminate(pl, lp, reason == Reason.DEATH, reason == Reason.LEAVE ? "ayrildin" : "elendin");
         }
         if (wp != null && !wp.isDead()) {
+            // kazananın kiti hemen silinir; sonraki eşleşmede kit yeniden, eksiksiz verilir
+            PlayerUtil.reset(wp);
             msg.title(wp, "kazandin-title", "kazandin-subtitle", 5, 40, 10);
             PlayerUtil.sound(wp, cfg(), "kazandin");
             wp.setFireTicks(0);

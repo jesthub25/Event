@@ -22,6 +22,8 @@ public final class Settings {
     public final int endDelay;
     public final int showTop;
     public final Set<Integer> announce;
+    /** Event saatinden kaç dakika önce herkese title ile hatırlatma yapılacağı */
+    public final Set<Integer> reminders;
     public final boolean waitingDamage;
     public final boolean waitingHunger;
     public final boolean roomPlace;
@@ -51,6 +53,7 @@ public final class Settings {
         endDelay = Math.max(1, c.getInt("ayarlar.mac-sonu-bekleme", 3));
         showTop = Math.max(1, c.getInt("ayarlar.sonuc-gosterilecek", 3));
         announce = new HashSet<>(c.getIntegerList("ayarlar.geri-sayim-duyurulari"));
+        reminders = new HashSet<>(c.getIntegerList("ayarlar.hatirlatma-dakikalari"));
         waitingDamage = c.getBoolean("ayarlar.bekleme-alani-hasar", false);
         waitingHunger = c.getBoolean("ayarlar.bekleme-alani-aclik", false);
         roomPlace = c.getBoolean("ayarlar.oda-blok-koyma", true);
@@ -66,7 +69,7 @@ public final class Settings {
             if (!l.isEmpty()) rewards.put(i, l);
         }
         participationReward = c.getStringList("katilim-odulu");
-        for (String k : new String[]{"event-acildi", "geri-sayim", "mac-basladi", "kazandin", "kaybettin", "sampiyon"}) {
+        for (String k : new String[]{"event-acildi", "geri-sayim", "mac-basladi", "kazandin", "kaybettin", "sampiyon", "hatirlatma"}) {
             String v = c.getString("sesler." + k, "");
             if (v != null && !v.isEmpty()) sounds.put(k, v.toLowerCase(java.util.Locale.ROOT));
         }
